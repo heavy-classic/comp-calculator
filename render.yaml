@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: comp-calculator
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        value: https://hpbvswyftptcztivcgli.supabase.co
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        value: sb_publishable_ZgF5Bsm2EPO8H2cY8fl-dQ_TS0o6Sm4
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
