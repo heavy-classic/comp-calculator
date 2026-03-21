@@ -8,6 +8,8 @@ import {
   Receipt,
   BarChart3,
   DollarSign,
+  TrendingUp,
+  FileText,
 } from 'lucide-react';
 
 const navItems = [
@@ -15,6 +17,8 @@ const navItems = [
   { href: '/deals', label: 'Deals', icon: Briefcase },
   { href: '/paychecks', label: 'Paychecks', icon: Receipt },
   { href: '/comparison', label: 'Comparison', icon: BarChart3 },
+  { href: '/analytics', label: 'Analytics', icon: TrendingUp },
+  { href: '/reports', label: 'Reports', icon: FileText },
 ];
 
 export default function Navigation() {

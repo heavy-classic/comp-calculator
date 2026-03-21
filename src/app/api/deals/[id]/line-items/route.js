@@ -31,6 +31,7 @@ export async function POST(request, { params }) {
     .insert([{
       deal_id: params.id,
       description: body.description,
+      item_type: body.item_type || 'Other',
       amount: body.amount,
       net_profit: body.net_profit || null,
       gross_margin_percent: body.gross_margin_percent || null,
