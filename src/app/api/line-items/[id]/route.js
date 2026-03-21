@@ -3,13 +3,14 @@ import { supabase } from '@/lib/supabase';
 import { calculateLineItemCommission } from '@/lib/commission';
 
 export async function PUT(request, { params }) {
+  const { id } = await params;
   const body = await request.json();
 
   // Fetch deal for commission calc
   const { data: item } = await supabase
     .from('deal_line_items')
     .select('deal_id')
-    .eq('id', params.id)
+    .eq('id', id)
     .single();
 
   let rate = body.commission_rate;
@@ -59,7 +60,7 @@ export async function PUT(request, { params }) {
       is_excluded: isExcluded,
       exclusion_reason: exclusionReason,
     })
-    .eq('id', params.id)
+    .eq('id', id)
     .select()
     .single();
 
@@ -87,17 +88,18 @@ export async function PUT(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
+  const { id } = await params;
   // Get deal_id before delete
   const { data: item } = await supabase
     .from('deal_line_items')
     .select('deal_id')
-    .eq('id', params.id)
+    .eq('id', id)
     .single();
 
   const { error } = await supabase
     .from('deal_line_items')
     .delete()
-    .eq('id', params.id);
+    .eq('id', id);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -3,13 +3,14 @@ import { supabase } from '@/lib/supabase';
 import { calculateLineItemCommission } from '@/lib/commission';
 
 export async function POST(request, { params }) {
+  const { id } = await params;
   const body = await request.json();
 
   // Fetch deal to get type/service for commission calc
   const { data: deal, error: dealError } = await supabase
     .from('deals')
     .select('deal_type, service_type')
-    .eq('id', params.id)
+    .eq('id', id)
     .single();
 
   if (dealError) {
@@ -29,7 +30,7 @@ export async function POST(request, { params }) {
   const { data, error } = await supabase
     .from('deal_line_items')
     .insert([{
-      deal_id: params.id,
+      deal_id: id,
       description: body.description,
       item_type: body.item_type || 'Other',
       amount: body.amount,
@@ -52,7 +53,7 @@ export async function POST(request, { params }) {
   }
 
   // Update deal total_value
-  await recalcDealTotal(params.id);
+  await recalcDealTotal(id);
 
   return NextResponse.json(data, { status: 201 });
 }

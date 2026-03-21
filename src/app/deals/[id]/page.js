@@ -26,7 +26,8 @@ async function getDeal(id) {
 }
 
 export default async function DealDetailPage({ params }) {
-  const deal = await getDeal(params.id);
+  const { id } = await params;
+  const deal = await getDeal(id);
   if (!deal) notFound();
 
   return <DealDetailClient deal={deal} />;

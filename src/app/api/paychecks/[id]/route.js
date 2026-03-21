@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
 export async function GET(request, { params }) {
+  const { id } = await params;
   const { data, error } = await supabase
     .from('paychecks')
     .select('*')
-    .eq('id', params.id)
+    .eq('id', id)
     .single();
 
   if (error) {
@@ -16,6 +17,7 @@ export async function GET(request, { params }) {
 }
 
 export async function PUT(request, { params }) {
+  const { id } = await params;
   const body = await request.json();
 
   const { data, error } = await supabase
@@ -32,7 +34,7 @@ export async function PUT(request, { params }) {
       net_amount: body.net_amount || null,
       notes: body.notes || null,
     })
-    .eq('id', params.id)
+    .eq('id', id)
     .select()
     .single();
 
@@ -44,10 +46,11 @@ export async function PUT(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
+  const { id } = await params;
   const { error } = await supabase
     .from('paychecks')
     .delete()
-    .eq('id', params.id);
+    .eq('id', id);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -2,13 +2,14 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
 export async function GET(request, { params }) {
+  const { id } = await params;
   const { data, error } = await supabase
     .from('deals')
     .select(`
       *,
       deal_line_items (*)
     `)
-    .eq('id', params.id)
+    .eq('id', id)
     .order('invoice_date', { ascending: true, foreignTable: 'deal_line_items' })
     .single();
 
@@ -20,6 +21,7 @@ export async function GET(request, { params }) {
 }
 
 export async function PUT(request, { params }) {
+  const { id } = await params;
   const body = await request.json();
 
   const { data, error } = await supabase
@@ -34,7 +36,7 @@ export async function PUT(request, { params }) {
       notes: body.notes,
       close_date: body.close_date || null,
     })
-    .eq('id', params.id)
+    .eq('id', id)
     .select()
     .single();
 
@@ -46,10 +48,11 @@ export async function PUT(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
+  const { id } = await params;
   const { error } = await supabase
     .from('deals')
     .delete()
-    .eq('id', params.id);
+    .eq('id', id);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
