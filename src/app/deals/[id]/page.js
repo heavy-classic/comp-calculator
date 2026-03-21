@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { supabase } from '@/lib/supabase';
 import { notFound } from 'next/navigation';
 import DealDetailClient from './DealDetailClient';
