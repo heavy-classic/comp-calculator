@@ -46,6 +46,7 @@ export async function PUT(request, { params }) {
     .from('deal_line_items')
     .update({
       description: body.description,
+      item_type: body.item_type || 'Other',
       amount: body.amount,
       net_profit: body.net_profit || null,
       gross_margin_percent: body.gross_margin_percent || null,

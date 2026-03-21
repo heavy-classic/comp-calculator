@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { calculateLineItemCommission, formatCurrency } from '@/lib/commission';
 
 const STATUSES = ['Pending', 'Invoiced'];
+const ITEM_TYPES = ['License', 'Support', 'Maintenance', 'Consulting', 'Other'];
 
 export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
   const isEdit = !!lineItem;
@@ -12,6 +13,7 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
 
   const [form, setForm] = useState({
     description: lineItem?.description || '',
+    item_type: lineItem?.item_type || 'Consulting',
     amount: lineItem?.amount || '',
     net_profit: lineItem?.net_profit || '',
     gross_margin_percent: lineItem?.gross_margin_percent || '',
@@ -105,16 +107,30 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
         </div>
       )}
 
-      <div>
-        <label className="label">Description *</label>
-        <input
-          type="text"
-          className="input"
-          value={form.description}
-          onChange={(e) => setForm({ ...form, description: e.target.value })}
-          placeholder="e.g. Monthly consulting fee - Jan 2025"
-          required
-        />
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="label">Description *</label>
+          <input
+            type="text"
+            className="input"
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            placeholder="e.g. Monthly consulting fee - Jan 2025"
+            required
+          />
+        </div>
+        <div>
+          <label className="label">Item Type</label>
+          <select
+            className="input"
+            value={form.item_type}
+            onChange={(e) => setForm({ ...form, item_type: e.target.value })}
+          >
+            {ITEM_TYPES.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
