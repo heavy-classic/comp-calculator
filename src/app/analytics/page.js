@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/commission';
 import { format, parseISO } from 'date-fns';
 import {
@@ -189,14 +188,25 @@ export default function AnalyticsPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [dealsRes, itemsRes, paychecksRes] = await Promise.all([
-          supabase.from('deals').select('*'),
-          supabase
-            .from('deal_line_items')
-            .select('*, deals(customer_name, deal_name, service_type, deal_type)'),
-          supabase.from('paychecks').select('*'),
+        const [deals, paychecks] = await Promise.all([
+          fetch('/api/deals').then((r) => r.json()),
+          fetch('/api/paychecks').then((r) => r.json()),
         ]);
-        setData(processData(dealsRes.data || [], itemsRes.data || [], paychecksRes.data || []));
+        const dealsArr = Array.isArray(deals) ? deals : [];
+        const paychecksArr = Array.isArray(paychecks) ? paychecks : [];
+        // Flatten line items and attach parent deal reference
+        const items = dealsArr.flatMap((deal) =>
+          (deal.deal_line_items || []).map((item) => ({
+            ...item,
+            deals: {
+              customer_name: deal.customer_name,
+              deal_name: deal.deal_name,
+              service_type: deal.service_type,
+              deal_type: deal.deal_type,
+            },
+          }))
+        );
+        setData(processData(dealsArr, items, paychecksArr));
       } catch (err) {
         setError(err.message);
       } finally {

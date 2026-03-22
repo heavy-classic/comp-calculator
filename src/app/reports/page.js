@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/commission';
 import { format, parseISO } from 'date-fns';
 import { FileText, Download, Mail, FileBarChart, FileSpreadsheet, FileClock, User } from 'lucide-react';
@@ -48,18 +47,16 @@ async function generateCommissionStatement(dateRange) {
   const jsPDF = (await import('jspdf')).default;
   const autoTable = (await import('jspdf-autotable')).default;
 
-  let query = supabase
-    .from('deal_line_items')
-    .select('*, deals(customer_name, deal_name, service_type, deal_type)')
-    .eq('status', 'Invoiced')
-    .eq('is_excluded', false)
-    .order('invoice_date');
-
-  if (dateRange.from) query = query.gte('invoice_date', dateRange.from);
-  if (dateRange.to) query = query.lte('invoice_date', dateRange.to);
-
-  const { data: items } = await query;
-  const rows = items || [];
+  const deals = await fetch('/api/deals').then((r) => r.json());
+  const allItems = (Array.isArray(deals) ? deals : []).flatMap((deal) =>
+    (deal.deal_line_items || []).map((item) => ({ ...item, deals: deal }))
+  );
+  const rows = allItems.filter((item) => {
+    if (item.status !== 'Invoiced' || item.is_excluded) return false;
+    if (dateRange.from && item.invoice_date && item.invoice_date < dateRange.from) return false;
+    if (dateRange.to && item.invoice_date && item.invoice_date > dateRange.to) return false;
+    return true;
+  }).sort((a, b) => (a.invoice_date || '').localeCompare(b.invoice_date || ''));
 
   const totalCommission = rows.reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
   const totalRevenue = rows.reduce((s, i) => s + parseFloat(i.amount || 0), 0);
@@ -121,12 +118,9 @@ async function generateDealPipeline() {
   const jsPDF = (await import('jspdf')).default;
   const autoTable = (await import('jspdf-autotable')).default;
 
-  const { data: deals } = await supabase
-    .from('deals')
-    .select('*, deal_line_items(commission_amount, is_excluded, status, amount)')
-    .order('created_at', { ascending: false });
+  const deals = await fetch('/api/deals').then((r) => r.json());
 
-  const rows = (deals || []).map((d) => {
+  const rows = (Array.isArray(deals) ? deals : []).map((d) => {
     const items = d.deal_line_items || [];
     const totalCommission = items
       .filter((i) => !i.is_excluded)
@@ -154,7 +148,7 @@ async function generateDealPipeline() {
 
   // Summary row
   const totalDeals = rows.length;
-  const closedDeals = (deals || []).filter((d) => d.status !== 'Pending').length;
+  const closedDeals = (Array.isArray(deals) ? deals : []).filter((d) => d.status !== 'Pending').length;
 
   doc.setFontSize(9);
   doc.setTextColor(100, 116, 139);
@@ -190,26 +184,23 @@ async function generatePaycheckReconciliation(dateRange) {
   const jsPDF = (await import('jspdf')).default;
   const autoTable = (await import('jspdf-autotable')).default;
 
-  let itemQuery = supabase
-    .from('deal_line_items')
-    .select('*, deals(customer_name, deal_name)')
-    .eq('status', 'Invoiced')
-    .eq('is_excluded', false)
-    .order('invoice_date');
-  let paycheckQuery = supabase.from('paychecks').select('*').order('pay_date');
-
-  if (dateRange.from) {
-    itemQuery = itemQuery.gte('invoice_date', dateRange.from);
-    paycheckQuery = paycheckQuery.gte('pay_date', dateRange.from);
-  }
-  if (dateRange.to) {
-    itemQuery = itemQuery.lte('invoice_date', dateRange.to);
-    paycheckQuery = paycheckQuery.lte('pay_date', dateRange.to);
-  }
-
-  const [{ data: items }, { data: paychecks }] = await Promise.all([itemQuery, paycheckQuery]);
-  const allItems = items || [];
-  const allPaychecks = paychecks || [];
+  const [deals, paychecks] = await Promise.all([
+    fetch('/api/deals').then((r) => r.json()),
+    fetch('/api/paychecks').then((r) => r.json()),
+  ]);
+  const allItems = (Array.isArray(deals) ? deals : [])
+    .flatMap((deal) => (deal.deal_line_items || []).map((item) => ({ ...item, deals: deal })))
+    .filter((item) => {
+      if (item.status !== 'Invoiced' || item.is_excluded) return false;
+      if (dateRange.from && item.invoice_date && item.invoice_date < dateRange.from) return false;
+      if (dateRange.to && item.invoice_date && item.invoice_date > dateRange.to) return false;
+      return true;
+    });
+  const allPaychecks = (Array.isArray(paychecks) ? paychecks : []).filter((p) => {
+    if (dateRange.from && p.pay_date && p.pay_date < dateRange.from) return false;
+    if (dateRange.to && p.pay_date && p.pay_date > dateRange.to) return false;
+    return true;
+  });
 
   const totalEarned = allItems.reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
   const totalPaid = allPaychecks.reduce((s, p) => s + parseFloat(p.commission_amount || 0), 0);
@@ -329,12 +320,12 @@ async function generateHRSummary(dateRange) {
   const jsPDF = (await import('jspdf')).default;
   const autoTable = (await import('jspdf-autotable')).default;
 
-  let query = supabase.from('paychecks').select('*').order('pay_date');
-  if (dateRange.from) query = query.gte('pay_date', dateRange.from);
-  if (dateRange.to) query = query.lte('pay_date', dateRange.to);
-
-  const { data: paychecks } = await query;
-  const rows = paychecks || [];
+  const paychecks = await fetch('/api/paychecks').then((r) => r.json());
+  const rows = (Array.isArray(paychecks) ? paychecks : []).filter((p) => {
+    if (dateRange.from && p.pay_date && p.pay_date < dateRange.from) return false;
+    if (dateRange.to && p.pay_date && p.pay_date > dateRange.to) return false;
+    return true;
+  });
 
   const totalGross = rows.reduce((s, p) => s + parseFloat(p.gross_amount || 0), 0);
   const totalNet = rows.reduce((s, p) => s + parseFloat(p.net_amount || 0), 0);
