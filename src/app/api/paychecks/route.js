@@ -112,132 +112,121 @@ function buildInsert(override, extracted, fileName, extractedText) {
 }
 
 /**
- * Parse ADP-style paycheck PDF text.
+ * Parse ADP paycheck PDF text as produced by pdf-parse.
  *
- * ADP encodes amounts with spaces instead of commas/decimal points,
- * e.g. "12 500 00" = $12,500.00 and "2 386 92" = $2,386.92.
- * The last two digits are always cents.
+ * pdf-parse strips spaces and merges columns, producing compact integers
+ * where the last 2 digits are always cents:
+ *   "$1250000"  → $12,500.00
+ *   "$882286"   → $8,822.86
+ *   "-238692238692" → Fed Tax -$2,386.92 (period) + $2,386.92 (YTD) concatenated
+ *   "-4752*4752"    → Medical -$47.52* (pre-tax, * separates period/YTD)
  */
 function parsePdfText(text) {
-  // Normalize line endings
   const t = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-
   const result = {};
 
-  // ── Dates ──────────────────────────────────────────────────────────────────
-  const datePatterns = {
-    pay_date: [
-      /Pay\s*Date[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
-      /Check\s*Date[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
-    ],
-    pay_period_start: [
-      /Period\s*Beginning[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
-      /Period\s*(?:Start|Begin|From)[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
-      /Pay\s*Period[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
-    ],
-    pay_period_end: [
-      /Period\s*Ending[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
-      /Period\s*(?:End|Through|To)[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
-    ],
-  };
-
-  for (const [field, patterns] of Object.entries(datePatterns)) {
-    for (const pat of patterns) {
-      const m = t.match(pat);
-      if (m) {
-        // Normalise MM/DD/YYYY → YYYY-MM-DD
-        const parts = m[1].split(/[/-]/);
-        if (parts.length === 3) {
-          const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
-          result[field] = `${year}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
-        } else {
-          result[field] = m[1];
-        }
-        break;
-      }
-    }
-  }
-
-  // ── ADP space-encoded amounts ─────────────────────────────────────────────
-  // "12 500 00" → 12500.00   "2 386 92" → 2386.92
-  function parseAdpAmount(raw) {
-    const digits = raw.replace(/\s+/g, '');
-    if (!digits || digits.length < 3) return null;
-    const cents = digits.slice(-2);
-    const dollars = digits.slice(0, -2) || '0';
-    const n = parseFloat(`${dollars}.${cents}`);
+  // Parse a compact ADP integer (last 2 digits = cents)
+  function fromCompact(s) {
+    const d = String(s).replace(/[^0-9]/g, '');
+    if (!d || d.length < 3) return null;
+    const n = parseFloat(d.slice(0, -2) + '.' + d.slice(-2));
     return isNaN(n) ? null : n;
   }
 
-  // Helper: match a label and capture the ADP amount that follows on the same line
-  // Also handles negative amounts prefixed with "-" or "$"
-  function extractAmount(pattern) {
-    const m = t.match(pattern);
-    if (!m) return null;
-    return parseAdpAmount(m[1].replace(/[$-]/g, '').trim());
-  }
-
-  // ── Earnings ───────────────────────────────────────────────────────────────
-  // "Gross Pay $12 500 00 12 500 00" — first amount is this-period
-  result.gross_amount = extractAmount(/Gross\s*Pay\s+\$?([\d\s]{4,})/i);
-
-  // "Regular 8333 34 86 67 12 500 00 12 500 00" — 4 columns: rate, hours, this-period, YTD
-  const regularMatch = t.match(/Regular\s+([\d\s]+)/i);
-  if (regularMatch) {
-    // Split into groups of space-separated tokens; last two groups of 2 are YTD + this-period
-    const tokens = regularMatch[1].trim().split(/\s+/);
-    // ADP layout: rate(2 tokens) hours(2 tokens) this-period(3 tokens) ytd(3 tokens)
-    // Easier: grab gross from "Gross Pay" line above; hours separately
-  }
-
-  // Hours: "Totl Hrs Worked 86 67"
-  const hoursMatch = t.match(/Tot(?:l|al)\s+Hrs?\s+Worked\s+([\d\s]{2,})/i);
-  if (hoursMatch) {
-    result.hours_worked = parseAdpAmount(hoursMatch[1].trim());
-  }
-
-  // Commission (explicit line item)
-  result.commission_amount = extractAmount(/Commission[:\s]+[-$]?([\d\s]{3,})/i);
-
-  // Base salary from "Regular" line — this-period column
-  const regLine = t.match(/^Regular\s+([\d\s]+)$/im);
-  if (regLine) {
-    // Try to pick the third money value (this-period gross)
-    const nums = regLine[1].trim().match(/(?:\d+\s+)+\d+/g);
-    if (nums && nums.length >= 3) {
-      result.base_salary = parseAdpAmount(nums[2]);
+  // ── Dates ───────────────────────────────────────────────────────────────────
+  [
+    ['pay_date',         /PayDate:(\d{2}\/\d{2}\/\d{4})/i],
+    ['pay_period_start', /PeriodBeginning:(\d{2}\/\d{2}\/\d{4})/i],
+    ['pay_period_end',   /PeriodEnding:(\d{2}\/\d{2}\/\d{4})/i],
+    // Fallback spaced variants
+    ['pay_date',         /Pay\s*Date:\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i],
+    ['pay_period_start', /Period\s*Beginning:\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i],
+    ['pay_period_end',   /Period\s*Ending:\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i],
+  ].forEach(([field, pat]) => {
+    if (result[field]) return; // already found
+    const m = t.match(pat);
+    if (!m) return;
+    const parts = m[1].split(/[/-]/);
+    if (parts.length === 3) {
+      const yr = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+      result[field] = `${yr}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
     }
+  });
+
+  // ── Gross & Net Pay ─────────────────────────────────────────────────────────
+  // All $NNNN amounts in document order; largest = gross, next = net
+  const dollarRe = /\$(\d{4,8})\b/g;
+  const dollarHits = [];
+  let dm;
+  while ((dm = dollarRe.exec(t)) !== null) {
+    const v = fromCompact(dm[1]);
+    if (v !== null) dollarHits.push(v);
+  }
+  // Filter out taxable wages (they appear after "taxablewages" keyword) — take only first 3
+  const earningAmounts = dollarHits.slice(0, 3).sort((a, b) => b - a);
+  if (earningAmounts.length >= 1) result.gross_amount = earningAmounts[0];
+  if (earningAmounts.length >= 2) result.net_amount   = earningAmounts[1];
+
+  // Taxable wages appear after their label
+  const fedTaxWages = t.match(/federaltaxablewages[^$]*\$(\d{6,8})/i);
+  if (fedTaxWages) result.federal_taxable_wages = fromCompact(fedTaxWages[1]);
+  const stateTaxWages = t.match(/(?:NC|[A-Z]{2})taxablewages[^$]*\$(\d{6,8})/i);
+  if (stateTaxWages) result.state_taxable_wages = fromCompact(stateTaxWages[1]);
+
+  // ── Hours ───────────────────────────────────────────────────────────────────
+  const hm = t.match(/TotlHrsWorked(\d{4})/i) || t.match(/TotalHrsWorked(\d{4})/i);
+  if (hm) result.hours_worked = fromCompact(hm[1]);
+
+  // ── Commission ──────────────────────────────────────────────────────────────
+  const commMatch = t.match(/Commission[:\s-]*(\d{4,})/i);
+  if (commMatch) result.commission_amount = fromCompact(commMatch[1]);
+
+  // ── Deductions ──────────────────────────────────────────────────────────────
+  // Only look in the section before "NetPay" to avoid picking up check amounts
+  const beforeNet = t.split(/NetPay|NetCheck/i)[0] || t;
+
+  // Pre-tax deductions (marked with *): -NNNN*NNNN  → take digits before *
+  const preTaxRe = /-(\d{3,6})\*\d+/g;
+  const preTax = [];
+  let pm;
+  while ((pm = preTaxRe.exec(beforeNet)) !== null) {
+    const v = fromCompact(pm[1]);
+    if (v !== null) preTax.push(v);
   }
 
-  // Net Pay: "Net Pay $8 822 86"
-  result.net_amount = extractAmount(/Net\s*Pay\s+\$?([\d\s]{4,})/i);
+  // Regular deductions: long negative numbers (period+YTD concatenated, ≥8 digits)
+  const regDeductRe = /-(\d{8,14})(?!\*)/g;
+  const regDeduct = [];
+  let rm;
+  while ((rm = regDeductRe.exec(beforeNet)) !== null) {
+    const full = rm[1];
+    // Take first half (period amount); both halves equal for first paycheck
+    const half = full.slice(0, Math.ceil(full.length / 2));
+    const v = fromCompact(half);
+    if (v !== null) regDeduct.push(v);
+  }
 
-  // ── Statutory deductions ───────────────────────────────────────────────────
-  result.federal_income_tax  = extractAmount(/Federal\s+Income\s+Tax\s+[-$]?([\d\s]{4,})/i);
-  result.social_security_tax = extractAmount(/Social\s+Security\s+Tax\s+[-$]?([\d\s]{3,})/i);
-  result.medicare_tax        = extractAmount(/Medicare\s+Tax\s+[-$]?([\d\s]{3,})/i);
-  result.state_income_tax    = extractAmount(/(?:[A-Z]{2}\s+)?State\s+Income\s+Tax\s+[-$]?([\d\s]{3,})/i);
+  // ADP standard order: Federal IT, SS, Medicare, State IT
+  if (regDeduct[0] != null) result.federal_income_tax  = regDeduct[0];
+  if (regDeduct[1] != null) result.social_security_tax = regDeduct[1];
+  if (regDeduct[2] != null) result.medicare_tax        = regDeduct[2];
+  if (regDeduct[3] != null) result.state_income_tax    = regDeduct[3];
 
-  // ── Pre-tax / other deductions ─────────────────────────────────────────────
-  result.medical_deduction   = extractAmount(/Medical\s+[-$]?([\d\s]{3,})\*/i);
-  result.retirement_401k     = extractAmount(/401[Kk][^-\n]*[-$]?([\d\s]{3,})\*/i);
+  // ADP standard order for pre-tax: Medical, 401K
+  if (preTax[0] != null) result.medical_deduction = preTax[0];
+  if (preTax[1] != null) result.retirement_401k   = preTax[1];
 
-  // Expense reimbursement — take the negative (deduction) line, not the credit
-  const expDeduct = t.match(/Expense\s+Reimbur[^\n]*-([\d\s]{3,})/i);
-  if (expDeduct) result.expense_reimbursement = parseAdpAmount(expDeduct[1].trim());
+  // Expense reimbursement: look for ExpenseReimbur followed by a standalone negative amount
+  const expMatch = beforeNet.match(/ExpenseReimbur[^-\d]*-(\d{4,6})\b/i);
+  if (expMatch) result.expense_reimbursement = fromCompact(expMatch[1]);
 
-  // ── Taxable wages ──────────────────────────────────────────────────────────
-  result.federal_taxable_wages = extractAmount(/federal\s+taxable\s+wages.*?\$?([\d\s]{4,})/i);
-  result.state_taxable_wages   = extractAmount(/[A-Z]{2}\s+taxable\s+wages.*?\$?([\d\s]{4,})/i);
-
-  // ── Compute total_deductions if not explicit ───────────────────────────────
-  const deductionFields = [
+  // ── Total deductions ────────────────────────────────────────────────────────
+  const deductFields = [
     'federal_income_tax', 'social_security_tax', 'medicare_tax',
     'state_income_tax', 'medical_deduction', 'retirement_401k',
   ];
-  const deductionSum = deductionFields.reduce((s, k) => s + (result[k] || 0), 0);
-  if (deductionSum > 0) result.total_deductions = +deductionSum.toFixed(2);
+  const deductSum = deductFields.reduce((s, k) => s + (result[k] || 0), 0);
+  if (deductSum > 0) result.total_deductions = +deductSum.toFixed(2);
 
-  // Strip out nulls to keep the object clean
-  return Object.fromEntries(Object.entries(result).filter(([, v]) => v !== null && v !== undefined));
+  return Object.fromEntries(Object.entries(result).filter(([, v]) => v != null));
 }
