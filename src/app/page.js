@@ -12,7 +12,6 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import DemoDataBanner from '@/components/DemoDataBanner';
 
 async function getDashboardData() {
   const [dealsRes, lineItemsRes, paychecksRes] = await Promise.all([
@@ -124,9 +123,6 @@ export default async function Dashboard() {
         <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
         <p className="text-slate-500 mt-1">Commission summary and overview</p>
       </div>
-
-      {/* Demo data banner */}
-      <DemoDataBanner hasData={data.totalDeals > 0} />
 
       {/* Metric Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
