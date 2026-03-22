@@ -1,5 +1,7 @@
+export const dynamic = 'force-dynamic';
+
 import { createSupabaseServerClient } from '@/lib/supabase-server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { NextResponse } from 'next/server';
 
 async function requireAdmin() {
@@ -21,7 +23,7 @@ export async function GET() {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const { data, error } = await supabaseAdmin.auth.admin.listUsers();
+  const { data, error } = await getSupabaseAdmin().auth.admin.listUsers();
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -50,7 +52,7 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
   }
 
-  const { data, error } = await supabaseAdmin.auth.admin.createUser({
+  const { data, error } = await getSupabaseAdmin().auth.admin.createUser({
     email,
     password,
     email_confirm: true,

@@ -1,5 +1,7 @@
+export const dynamic = 'force-dynamic';
+
 import { createSupabaseServerClient } from '@/lib/supabase-server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { NextResponse } from 'next/server';
 
 async function requireAdmin() {
@@ -32,7 +34,7 @@ export async function PATCH(request, { params }) {
     updates.password = body.password;
   }
 
-  const { data, error } = await supabaseAdmin.auth.admin.updateUserById(id, updates);
+  const { data, error } = await getSupabaseAdmin().auth.admin.updateUserById(id, updates);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
@@ -61,7 +63,7 @@ export async function DELETE(request, { params }) {
     return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 });
   }
 
-  const { error } = await supabaseAdmin.auth.admin.deleteUser(id);
+  const { error } = await getSupabaseAdmin().auth.admin.deleteUser(id);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
