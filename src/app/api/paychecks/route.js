@@ -33,7 +33,9 @@ export async function POST(request) {
       try {
         const pdfParse = (await import('pdf-parse')).default;
         const pdfData = await pdfParse(buffer);
-        extractedText = pdfData.text || '';
+        // Strip lone surrogates and other characters invalid in JSON/PostgreSQL
+        // (ADP PDFs contain custom font glyphs that produce these)
+        extractedText = sanitizeText(pdfData.text || '');
         extractedData = parsePdfText(extractedText);
       } catch (err) {
         console.error('PDF parse error:', err);
@@ -109,6 +111,19 @@ function buildInsert(override, extracted, fileName, extractedText) {
     extracted_data:         Object.keys(extracted).length ? extracted : (override.extracted_data ?? null),
     notes:                  pick('notes'),
   };
+}
+
+/**
+ * Remove characters that are invalid in JSON or PostgreSQL text:
+ * lone Unicode surrogates (U+D800–U+DFFF), null bytes, and other
+ * non-printable control characters. ADP PDFs produce these via their
+ * custom font encoding.
+ */
+function sanitizeText(text) {
+  return text
+    .replace(/[\uD800-\uDFFF]/g, '')   // lone surrogates
+    .replace(/\u0000/g, '')             // null bytes
+    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' '); // other controls
 }
 
 /**
