@@ -18,7 +18,6 @@ export async function POST(request) {
   const contentType = request.headers.get('content-type') || '';
 
   if (contentType.includes('multipart/form-data')) {
-    // Handle PDF upload
     const formData = await request.formData();
     const file = formData.get('file');
     const metadata = formData.get('metadata');
@@ -32,7 +31,6 @@ export async function POST(request) {
       const buffer = Buffer.from(bytes);
 
       try {
-        // Dynamically import pdf-parse to avoid issues
         const pdfParse = (await import('pdf-parse')).default;
         const pdfData = await pdfParse(buffer);
         extractedText = pdfData.text || '';
@@ -43,21 +41,7 @@ export async function POST(request) {
       }
     }
 
-    const insertData = {
-      pay_date: meta.pay_date || extractedData.pay_date || null,
-      pay_period_start: meta.pay_period_start || extractedData.pay_period_start || null,
-      pay_period_end: meta.pay_period_end || extractedData.pay_period_end || null,
-      gross_amount: meta.gross_amount || extractedData.gross_amount || null,
-      commission_amount: meta.commission_amount || extractedData.commission_amount || null,
-      base_salary: meta.base_salary || extractedData.base_salary || null,
-      other_earnings: meta.other_earnings || extractedData.other_earnings || null,
-      total_deductions: meta.total_deductions || extractedData.total_deductions || null,
-      net_amount: meta.net_amount || extractedData.net_amount || null,
-      file_name: file ? file.name : null,
-      extracted_text: extractedText,
-      extracted_data: extractedData,
-      notes: meta.notes || null,
-    };
+    const insertData = buildInsert(meta, extractedData, file ? file.name : null, extractedText);
 
     const { data, error } = await supabase
       .from('paychecks')
@@ -72,26 +56,12 @@ export async function POST(request) {
     return NextResponse.json(data, { status: 201 });
   }
 
-  // Handle JSON (manual entry or update after extraction)
+  // Handle JSON (manual entry)
   const body = await request.json();
 
   const { data, error } = await supabase
     .from('paychecks')
-    .insert([{
-      pay_date: body.pay_date || null,
-      pay_period_start: body.pay_period_start || null,
-      pay_period_end: body.pay_period_end || null,
-      gross_amount: body.gross_amount || null,
-      commission_amount: body.commission_amount || null,
-      base_salary: body.base_salary || null,
-      other_earnings: body.other_earnings || null,
-      total_deductions: body.total_deductions || null,
-      net_amount: body.net_amount || null,
-      file_name: body.file_name || null,
-      extracted_text: body.extracted_text || null,
-      extracted_data: body.extracted_data || null,
-      notes: body.notes || null,
-    }])
+    .insert([buildInsert(body, {}, null, null)])
     .select()
     .single();
 
@@ -102,65 +72,172 @@ export async function POST(request) {
   return NextResponse.json(data, { status: 201 });
 }
 
+/** Merge override fields on top of extracted data */
+function buildInsert(override, extracted, fileName, extractedText) {
+  const pick = (key) => {
+    const v = override[key] ?? extracted[key];
+    return v !== '' && v !== undefined ? v : null;
+  };
+  const pickNum = (key) => {
+    const v = override[key] ?? extracted[key];
+    const n = parseFloat(v);
+    return isNaN(n) ? null : n;
+  };
+
+  return {
+    pay_date:               pick('pay_date'),
+    pay_period_start:       pick('pay_period_start'),
+    pay_period_end:         pick('pay_period_end'),
+    gross_amount:           pickNum('gross_amount'),
+    commission_amount:      pickNum('commission_amount'),
+    base_salary:            pickNum('base_salary'),
+    other_earnings:         pickNum('other_earnings'),
+    hours_worked:           pickNum('hours_worked'),
+    federal_income_tax:     pickNum('federal_income_tax'),
+    social_security_tax:    pickNum('social_security_tax'),
+    medicare_tax:           pickNum('medicare_tax'),
+    state_income_tax:       pickNum('state_income_tax'),
+    medical_deduction:      pickNum('medical_deduction'),
+    retirement_401k:        pickNum('retirement_401k'),
+    expense_reimbursement:  pickNum('expense_reimbursement'),
+    total_deductions:       pickNum('total_deductions'),
+    federal_taxable_wages:  pickNum('federal_taxable_wages'),
+    state_taxable_wages:    pickNum('state_taxable_wages'),
+    net_amount:             pickNum('net_amount'),
+    file_name:              fileName ?? pick('file_name'),
+    extracted_text:         extractedText ?? pick('extracted_text'),
+    extracted_data:         Object.keys(extracted).length ? extracted : (override.extracted_data ?? null),
+    notes:                  pick('notes'),
+  };
+}
+
 /**
- * Try to extract common paycheck fields from PDF text using regex patterns.
- * This is a best-effort extraction — users can always edit manually.
+ * Parse ADP-style paycheck PDF text.
+ *
+ * ADP encodes amounts with spaces instead of commas/decimal points,
+ * e.g. "12 500 00" = $12,500.00 and "2 386 92" = $2,386.92.
+ * The last two digits are always cents.
  */
 function parsePdfText(text) {
+  // Normalize line endings
+  const t = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
   const result = {};
 
-  // Common patterns for paychecks
-  const patterns = {
+  // ── Dates ──────────────────────────────────────────────────────────────────
+  const datePatterns = {
     pay_date: [
-      /pay\s*date[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
-      /check\s*date[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
-      /payment\s*date[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
+      /Pay\s*Date[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
+      /Check\s*Date[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
     ],
     pay_period_start: [
-      /period\s*(?:start|begin|from)[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
-      /pay\s*period[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
+      /Period\s*Beginning[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
+      /Period\s*(?:Start|Begin|From)[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
+      /Pay\s*Period[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
     ],
     pay_period_end: [
-      /period\s*(?:end|through|to)[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
-    ],
-    gross_amount: [
-      /gross\s*(?:pay|earnings|wages?)[:\s]+\$?([\d,]+\.?\d*)/i,
-      /total\s*gross[:\s]+\$?([\d,]+\.?\d*)/i,
-    ],
-    commission_amount: [
-      /commission[:\s]+\$?([\d,]+\.?\d*)/i,
-      /sales\s*commission[:\s]+\$?([\d,]+\.?\d*)/i,
-    ],
-    base_salary: [
-      /(?:base\s*salary|regular\s*pay|salary)[:\s]+\$?([\d,]+\.?\d*)/i,
-    ],
-    net_amount: [
-      /net\s*(?:pay|amount)[:\s]+\$?([\d,]+\.?\d*)/i,
-      /total\s*net[:\s]+\$?([\d,]+\.?\d*)/i,
-    ],
-    total_deductions: [
-      /total\s*deductions?[:\s]+\$?([\d,]+\.?\d*)/i,
+      /Period\s*Ending[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
+      /Period\s*(?:End|Through|To)[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
     ],
   };
 
-  for (const [field, fieldPatterns] of Object.entries(patterns)) {
-    for (const pattern of fieldPatterns) {
-      const match = text.match(pattern);
-      if (match) {
-        let value = match[1].replace(/,/g, '');
-        if (['gross_amount', 'commission_amount', 'base_salary', 'net_amount', 'total_deductions'].includes(field)) {
-          value = parseFloat(value);
-          if (!isNaN(value)) {
-            result[field] = value;
-            break;
-          }
+  for (const [field, patterns] of Object.entries(datePatterns)) {
+    for (const pat of patterns) {
+      const m = t.match(pat);
+      if (m) {
+        // Normalise MM/DD/YYYY → YYYY-MM-DD
+        const parts = m[1].split(/[/-]/);
+        if (parts.length === 3) {
+          const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+          result[field] = `${year}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
         } else {
-          result[field] = value;
-          break;
+          result[field] = m[1];
         }
+        break;
       }
     }
   }
 
-  return result;
+  // ── ADP space-encoded amounts ─────────────────────────────────────────────
+  // "12 500 00" → 12500.00   "2 386 92" → 2386.92
+  function parseAdpAmount(raw) {
+    const digits = raw.replace(/\s+/g, '');
+    if (!digits || digits.length < 3) return null;
+    const cents = digits.slice(-2);
+    const dollars = digits.slice(0, -2) || '0';
+    const n = parseFloat(`${dollars}.${cents}`);
+    return isNaN(n) ? null : n;
+  }
+
+  // Helper: match a label and capture the ADP amount that follows on the same line
+  // Also handles negative amounts prefixed with "-" or "$"
+  function extractAmount(pattern) {
+    const m = t.match(pattern);
+    if (!m) return null;
+    return parseAdpAmount(m[1].replace(/[$-]/g, '').trim());
+  }
+
+  // ── Earnings ───────────────────────────────────────────────────────────────
+  // "Gross Pay $12 500 00 12 500 00" — first amount is this-period
+  result.gross_amount = extractAmount(/Gross\s*Pay\s+\$?([\d\s]{4,})/i);
+
+  // "Regular 8333 34 86 67 12 500 00 12 500 00" — 4 columns: rate, hours, this-period, YTD
+  const regularMatch = t.match(/Regular\s+([\d\s]+)/i);
+  if (regularMatch) {
+    // Split into groups of space-separated tokens; last two groups of 2 are YTD + this-period
+    const tokens = regularMatch[1].trim().split(/\s+/);
+    // ADP layout: rate(2 tokens) hours(2 tokens) this-period(3 tokens) ytd(3 tokens)
+    // Easier: grab gross from "Gross Pay" line above; hours separately
+  }
+
+  // Hours: "Totl Hrs Worked 86 67"
+  const hoursMatch = t.match(/Tot(?:l|al)\s+Hrs?\s+Worked\s+([\d\s]{2,})/i);
+  if (hoursMatch) {
+    result.hours_worked = parseAdpAmount(hoursMatch[1].trim());
+  }
+
+  // Commission (explicit line item)
+  result.commission_amount = extractAmount(/Commission[:\s]+[-$]?([\d\s]{3,})/i);
+
+  // Base salary from "Regular" line — this-period column
+  const regLine = t.match(/^Regular\s+([\d\s]+)$/im);
+  if (regLine) {
+    // Try to pick the third money value (this-period gross)
+    const nums = regLine[1].trim().match(/(?:\d+\s+)+\d+/g);
+    if (nums && nums.length >= 3) {
+      result.base_salary = parseAdpAmount(nums[2]);
+    }
+  }
+
+  // Net Pay: "Net Pay $8 822 86"
+  result.net_amount = extractAmount(/Net\s*Pay\s+\$?([\d\s]{4,})/i);
+
+  // ── Statutory deductions ───────────────────────────────────────────────────
+  result.federal_income_tax  = extractAmount(/Federal\s+Income\s+Tax\s+[-$]?([\d\s]{4,})/i);
+  result.social_security_tax = extractAmount(/Social\s+Security\s+Tax\s+[-$]?([\d\s]{3,})/i);
+  result.medicare_tax        = extractAmount(/Medicare\s+Tax\s+[-$]?([\d\s]{3,})/i);
+  result.state_income_tax    = extractAmount(/(?:[A-Z]{2}\s+)?State\s+Income\s+Tax\s+[-$]?([\d\s]{3,})/i);
+
+  // ── Pre-tax / other deductions ─────────────────────────────────────────────
+  result.medical_deduction   = extractAmount(/Medical\s+[-$]?([\d\s]{3,})\*/i);
+  result.retirement_401k     = extractAmount(/401[Kk][^-\n]*[-$]?([\d\s]{3,})\*/i);
+
+  // Expense reimbursement — take the negative (deduction) line, not the credit
+  const expDeduct = t.match(/Expense\s+Reimbur[^\n]*-([\d\s]{3,})/i);
+  if (expDeduct) result.expense_reimbursement = parseAdpAmount(expDeduct[1].trim());
+
+  // ── Taxable wages ──────────────────────────────────────────────────────────
+  result.federal_taxable_wages = extractAmount(/federal\s+taxable\s+wages.*?\$?([\d\s]{4,})/i);
+  result.state_taxable_wages   = extractAmount(/[A-Z]{2}\s+taxable\s+wages.*?\$?([\d\s]{4,})/i);
+
+  // ── Compute total_deductions if not explicit ───────────────────────────────
+  const deductionFields = [
+    'federal_income_tax', 'social_security_tax', 'medicare_tax',
+    'state_income_tax', 'medical_deduction', 'retirement_401k',
+  ];
+  const deductionSum = deductionFields.reduce((s, k) => s + (result[k] || 0), 0);
+  if (deductionSum > 0) result.total_deductions = +deductionSum.toFixed(2);
+
+  // Strip out nulls to keep the object clean
+  return Object.fromEntries(Object.entries(result).filter(([, v]) => v !== null && v !== undefined));
 }
