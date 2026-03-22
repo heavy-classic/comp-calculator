@@ -14,6 +14,13 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Bake NEXT_PUBLIC_ vars into the client bundle at build time
+# Render passes these as Docker build args from the environment variables set in the dashboard
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+
 RUN npm run build
 
 # Stage 3: Production runner
