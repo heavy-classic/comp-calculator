@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const SERVICE_TYPES = ['IdeaGen', 'Other'];
 const DEAL_TYPES = ['Implementation', 'Renewal', 'SoftwareResale'];
@@ -10,6 +10,7 @@ export default function DealForm({ deal, onSuccess, onCancel }) {
   const isEdit = !!deal;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [customers, setCustomers] = useState([]);
   const [form, setForm] = useState({
     customer_name: deal?.customer_name || '',
     deal_name: deal?.deal_name || '',
@@ -19,6 +20,13 @@ export default function DealForm({ deal, onSuccess, onCancel }) {
     close_date: deal?.close_date || '',
     notes: deal?.notes || '',
   });
+
+  useEffect(() => {
+    fetch('/api/customers')
+      .then((r) => r.ok ? r.json() : [])
+      .then(setCustomers)
+      .catch(() => {});
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -62,14 +70,21 @@ export default function DealForm({ deal, onSuccess, onCancel }) {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="label">Customer Name *</label>
-          <input
-            type="text"
+          <select
             className="input"
             value={form.customer_name}
             onChange={(e) => setForm({ ...form, customer_name: e.target.value })}
-            placeholder="e.g. PPPO"
             required
-          />
+          >
+            <option value="">— Select customer —</option>
+            {/* If editing and existing value isn't in list, show it */}
+            {isEdit && form.customer_name && !customers.find((c) => c.name === form.customer_name) && (
+              <option value={form.customer_name}>{form.customer_name}</option>
+            )}
+            {customers.map((c) => (
+              <option key={c.id} value={c.name}>{c.name}</option>
+            ))}
+          </select>
         </div>
         <div>
           <label className="label">Deal Name *</label>

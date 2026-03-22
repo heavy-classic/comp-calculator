@@ -13,6 +13,7 @@ import {
   Shield,
   LogOut,
   User,
+  Building2,
 } from 'lucide-react';
 
 const navItems = [
@@ -86,7 +87,7 @@ export default function Navigation({ user, isAdmin }) {
               href="/admin/users"
               className={`
                 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
-                ${pathname.startsWith('/admin')
+                ${pathname === '/admin/users'
                   ? 'bg-blue-600 text-white'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
                 }
@@ -94,6 +95,19 @@ export default function Navigation({ user, isAdmin }) {
             >
               <Shield className="w-4 h-4" />
               Users
+            </Link>
+            <Link
+              href="/admin/customers"
+              className={`
+                flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
+                ${pathname === '/admin/customers'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }
+              `}
+            >
+              <Building2 className="w-4 h-4" />
+              Customers
             </Link>
           </>
         )}
