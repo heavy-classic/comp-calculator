@@ -11,15 +11,16 @@ export default function LoginForm() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  );
-
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
     setLoading(true);
+
+    // Create client lazily inside the handler so it's never called during SSR/prerender
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    );
 
     const { error } = await supabase.auth.signInWithPassword({ email, password });
 
