@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Briefcase,
@@ -10,6 +10,9 @@ import {
   DollarSign,
   TrendingUp,
   FileText,
+  Shield,
+  LogOut,
+  User,
 } from 'lucide-react';
 
 const navItems = [
@@ -21,8 +24,15 @@ const navItems = [
   { href: '/reports', label: 'Reports', icon: FileText },
 ];
 
-export default function Navigation() {
+export default function Navigation({ user, isAdmin }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleSignOut() {
+    await fetch('/api/auth/signout', { method: 'POST' });
+    router.push('/login');
+    router.refresh();
+  }
 
   return (
     <aside className="fixed left-0 top-0 h-full w-64 bg-slate-900 text-white flex flex-col z-50">
@@ -63,6 +73,30 @@ export default function Navigation() {
             </Link>
           );
         })}
+
+        {/* Admin section */}
+        {isAdmin && (
+          <>
+            <div className="pt-4 pb-1">
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide px-3">
+                Admin
+              </p>
+            </div>
+            <Link
+              href="/admin/users"
+              className={`
+                flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
+                ${pathname.startsWith('/admin')
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }
+              `}
+            >
+              <Shield className="w-4 h-4" />
+              Users
+            </Link>
+          </>
+        )}
       </nav>
 
       {/* Commission Rate Reference */}
@@ -96,6 +130,30 @@ export default function Navigation() {
             <span className="text-slate-300 font-medium">15%</span>
           </div>
         </div>
+      </div>
+
+      {/* User / Sign out */}
+      <div className="p-4 border-t border-slate-700">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-7 h-7 bg-slate-700 rounded-full flex items-center justify-center flex-shrink-0">
+            <User className="w-3.5 h-3.5 text-slate-300" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs text-slate-300 font-medium truncate">
+              {user?.email ?? ''}
+            </p>
+            {isAdmin && (
+              <p className="text-xs text-purple-400">Admin</p>
+            )}
+          </div>
+        </div>
+        <button
+          onClick={handleSignOut}
+          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          Sign out
+        </button>
       </div>
     </aside>
   );
