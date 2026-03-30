@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 
 const SERVICE_TYPES = ['IdeaGen', 'Other'];
-const DEAL_TYPES = ['Implementation', 'Renewal', 'SoftwareResale'];
 const STATUSES = ['Pending', 'Closed', 'Invoiced'];
 
 export default function DealForm({ deal, onSuccess, onCancel }) {
@@ -15,7 +14,6 @@ export default function DealForm({ deal, onSuccess, onCancel }) {
     customer_name: deal?.customer_name || '',
     deal_name: deal?.deal_name || '',
     service_type: deal?.service_type || 'IdeaGen',
-    deal_type: deal?.deal_type || 'Implementation',
     status: deal?.status || 'Pending',
     close_date: deal?.close_date || '',
     notes: deal?.notes || '',
@@ -99,34 +97,20 @@ export default function DealForm({ deal, onSuccess, onCancel }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="label">Service Type</label>
-          <select
-            className="input"
-            value={form.service_type}
-            onChange={(e) => setForm({ ...form, service_type: e.target.value })}
-          >
-            {SERVICE_TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-          <p className="text-xs text-slate-400 mt-1">
-            IdeaGen = 10% impl / 5% renewal | Other = 4% impl / 2% renewal
-          </p>
-        </div>
-        <div>
-          <label className="label">Deal Type</label>
-          <select
-            className="input"
-            value={form.deal_type}
-            onChange={(e) => setForm({ ...form, deal_type: e.target.value })}
-          >
-            {DEAL_TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-        </div>
+      <div>
+        <label className="label">Service Type</label>
+        <select
+          className="input"
+          value={form.service_type}
+          onChange={(e) => setForm({ ...form, service_type: e.target.value })}
+        >
+          {SERVICE_TYPES.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
+        <p className="text-xs text-slate-400 mt-1">
+          IdeaGen = 10% impl / 5% renewal | Other = 4% impl / 2% renewal
+        </p>
       </div>
 
       <div className="grid grid-cols-2 gap-4">

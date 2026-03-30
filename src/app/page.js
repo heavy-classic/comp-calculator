@@ -14,28 +14,28 @@ import {
 import { format, parseISO } from 'date-fns';
 
 async function getDashboardData() {
-  const [dealsRes, lineItemsRes, paychecksRes] = await Promise.all([
+  const [dealsRes, lineItemsRes, invoicesRes, paychecksRes] = await Promise.all([
     supabase.from('deals').select('*, deal_line_items(*)').order('created_at', { ascending: false }),
     supabase.from('deal_line_items').select('*'),
+    supabase.from('line_item_invoices').select('*').order('invoice_date', { ascending: false }),
     supabase.from('paychecks').select('*').order('pay_date', { ascending: false }).limit(5),
   ]);
 
   const deals = dealsRes.data || [];
   const lineItems = lineItemsRes.data || [];
+  const allInvoices = invoicesRes.data || [];
   const recentPaychecks = paychecksRes.data || [];
 
-  // Calculate totals
+  // Total potential commission (based on line item amounts)
   const totalCommissionDue = lineItems
     .filter((i) => !i.is_excluded)
     .reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
 
-  const invoicedCommission = lineItems
-    .filter((i) => !i.is_excluded && i.status === 'Invoiced')
-    .reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
+  // Invoiced commission = sum of actual invoice commissions
+  const invoicedCommission = allInvoices
+    .reduce((s, inv) => s + parseFloat(inv.commission_amount || 0), 0);
 
-  const pendingCommission = lineItems
-    .filter((i) => !i.is_excluded && i.status === 'Pending')
-    .reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
+  const pendingCommission = totalCommissionDue - invoicedCommission;
 
   const totalPaid = recentPaychecks.reduce((s, p) => s + parseFloat(p.commission_amount || 0), 0);
 
@@ -45,17 +45,24 @@ async function getDashboardData() {
     Invoiced: deals.filter((d) => d.status === 'Invoiced').length,
   };
 
-  // Upcoming invoices (next 90 days)
+  // Upcoming invoices: future-dated invoices (next 90 days)
   const today = new Date();
   const in90 = new Date(today.getTime() + 90 * 24 * 60 * 60 * 1000);
-  const upcomingItems = lineItems
-    .filter((i) => {
-      if (!i.invoice_date || i.status === 'Invoiced') return false;
-      const d = new Date(i.invoice_date);
+
+  // Build a quick lookup of line item descriptions
+  const lineItemMap = Object.fromEntries(lineItems.map((i) => [i.id, i]));
+
+  const upcomingItems = allInvoices
+    .filter((inv) => {
+      const d = new Date(inv.invoice_date);
       return d >= today && d <= in90;
     })
     .sort((a, b) => new Date(a.invoice_date) - new Date(b.invoice_date))
-    .slice(0, 5);
+    .slice(0, 5)
+    .map((inv) => ({
+      ...inv,
+      description: lineItemMap[inv.line_item_id]?.description || 'Invoice',
+    }));
 
   return {
     totalCommissionDue,
@@ -246,7 +253,6 @@ export default async function Dashboard() {
                 <tr className="border-b border-slate-100">
                   <th className="text-left py-2 text-slate-500 font-medium">Customer</th>
                   <th className="text-left py-2 text-slate-500 font-medium">Deal</th>
-                  <th className="text-left py-2 text-slate-500 font-medium">Type</th>
                   <th className="text-left py-2 text-slate-500 font-medium">Status</th>
                   <th className="text-right py-2 text-slate-500 font-medium">Commission</th>
                 </tr>
@@ -263,9 +269,6 @@ export default async function Dashboard() {
                         <Link href={`/deals/${deal.id}`} className="hover:text-blue-600 hover:underline">
                           {deal.deal_name}
                         </Link>
-                      </td>
-                      <td className="py-3 text-slate-500">
-                        {deal.service_type} / {deal.deal_type}
                       </td>
                       <td className="py-3">
                         <StatusBadge status={deal.status} />

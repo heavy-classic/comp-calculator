@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { calculateLineItemCommission, formatCurrency } from '@/lib/commission';
 
-const STATUSES = ['Pending', 'Invoiced'];
+const DEAL_TYPES = ['Implementation', 'Renewal', 'SoftwareResale'];
 const ITEM_TYPES = ['License', 'Support', 'Maintenance', 'Consulting', 'Other'];
 
 export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
@@ -14,11 +14,10 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
   const [form, setForm] = useState({
     description: lineItem?.description || '',
     item_type: lineItem?.item_type || 'Consulting',
+    deal_type: lineItem?.deal_type || 'Implementation',
     amount: lineItem?.amount || '',
     net_profit: lineItem?.net_profit || '',
     gross_margin_percent: lineItem?.gross_margin_percent || '',
-    invoice_date: lineItem?.invoice_date || '',
-    status: lineItem?.status || 'Pending',
     year_number: lineItem?.year_number || 1,
     is_upsell: lineItem?.is_upsell || false,
   });
@@ -28,7 +27,7 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
   useEffect(() => {
     if (form.amount) {
       const calc = calculateLineItemCommission({
-        dealType: deal.deal_type,
+        dealType: form.deal_type,
         serviceType: deal.service_type,
         amount: parseFloat(form.amount) || 0,
         netProfit: parseFloat(form.net_profit) || null,
@@ -40,7 +39,7 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
     } else {
       setPreview(null);
     }
-  }, [form.amount, form.net_profit, form.gross_margin_percent, form.year_number, form.is_upsell, deal]);
+  }, [form.amount, form.deal_type, form.net_profit, form.gross_margin_percent, form.year_number, form.is_upsell, deal]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -115,7 +114,7 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
             className="input"
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
-            placeholder="e.g. Monthly consulting fee - Jan 2025"
+            placeholder="e.g. Year 1 License Fee"
             required
           />
         </div>
@@ -133,6 +132,19 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
         </div>
       </div>
 
+      <div>
+        <label className="label">Deal Type</label>
+        <select
+          className="input"
+          value={form.deal_type}
+          onChange={(e) => setForm({ ...form, deal_type: e.target.value })}
+        >
+          {DEAL_TYPES.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
+      </div>
+
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="label">Amount ($) *</label>
@@ -148,7 +160,7 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
           />
         </div>
 
-        {deal.deal_type === 'SoftwareResale' ? (
+        {form.deal_type === 'SoftwareResale' ? (
           <div>
             <label className="label">Net Profit ($)</label>
             <input
@@ -180,7 +192,7 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
         )}
       </div>
 
-      {deal.deal_type === 'SoftwareResale' && (
+      {form.deal_type === 'SoftwareResale' && (
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="label">Year Number</label>
@@ -208,31 +220,6 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
           </div>
         </div>
       )}
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="label">Invoice Date</label>
-          <input
-            type="date"
-            className="input"
-            value={form.invoice_date}
-            onChange={(e) => setForm({ ...form, invoice_date: e.target.value })}
-          />
-          <p className="text-xs text-slate-400 mt-1">When this line item will be/was invoiced</p>
-        </div>
-        <div>
-          <label className="label">Status</label>
-          <select
-            className="input"
-            value={form.status}
-            onChange={(e) => setForm({ ...form, status: e.target.value })}
-          >
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
-      </div>
 
       <div className="flex gap-3 pt-2">
         <button type="submit" disabled={loading} className="btn-primary flex-1">

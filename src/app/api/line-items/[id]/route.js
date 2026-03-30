@@ -6,28 +6,28 @@ export async function PUT(request, { params }) {
   const { id } = await params;
   const body = await request.json();
 
-  // Fetch deal for commission calc
+  // Fetch line item to get deal_id; deal_type now comes from body
   const { data: item } = await supabase
     .from('deal_line_items')
     .select('deal_id')
     .eq('id', id)
     .single();
 
-  let rate = body.commission_rate;
-  let commissionAmount = body.commission_amount;
-  let isExcluded = body.is_excluded;
-  let exclusionReason = body.exclusion_reason;
+  let rate = 0;
+  let commissionAmount = 0;
+  let isExcluded = false;
+  let exclusionReason = null;
 
   if (item) {
     const { data: deal } = await supabase
       .from('deals')
-      .select('deal_type, service_type')
+      .select('service_type')
       .eq('id', item.deal_id)
       .single();
 
     if (deal) {
       const calc = calculateLineItemCommission({
-        dealType: deal.deal_type,
+        dealType: body.deal_type || 'Implementation',
         serviceType: deal.service_type,
         amount: body.amount,
         netProfit: body.net_profit,
@@ -48,11 +48,10 @@ export async function PUT(request, { params }) {
     .update({
       description: body.description,
       item_type: body.item_type || 'Other',
+      deal_type: body.deal_type || 'Implementation',
       amount: body.amount,
       net_profit: body.net_profit || null,
       gross_margin_percent: body.gross_margin_percent || null,
-      invoice_date: body.invoice_date || null,
-      status: body.status,
       year_number: body.year_number || 1,
       is_upsell: body.is_upsell || false,
       commission_rate: rate,
@@ -84,12 +83,12 @@ export async function PUT(request, { params }) {
     }
   }
 
+  // Return with invoices preserved (caller merges)
   return NextResponse.json(data);
 }
 
 export async function DELETE(request, { params }) {
   const { id } = await params;
-  // Get deal_id before delete
   const { data: item } = await supabase
     .from('deal_line_items')
     .select('deal_id')
@@ -105,7 +104,6 @@ export async function DELETE(request, { params }) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Recalc deal total
   if (item) {
     const { data: items } = await supabase
       .from('deal_line_items')

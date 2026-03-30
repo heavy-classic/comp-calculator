@@ -6,10 +6,10 @@ export async function POST(request, { params }) {
   const { id } = await params;
   const body = await request.json();
 
-  // Fetch deal to get type/service for commission calc
+  // Fetch deal for service_type only — deal_type now lives on the line item
   const { data: deal, error: dealError } = await supabase
     .from('deals')
-    .select('deal_type, service_type')
+    .select('service_type')
     .eq('id', id)
     .single();
 
@@ -18,7 +18,7 @@ export async function POST(request, { params }) {
   }
 
   const { rate, commissionAmount, isExcluded, exclusionReason } = calculateLineItemCommission({
-    dealType: deal.deal_type,
+    dealType: body.deal_type || 'Implementation',
     serviceType: deal.service_type,
     amount: body.amount,
     netProfit: body.net_profit,
@@ -33,11 +33,10 @@ export async function POST(request, { params }) {
       deal_id: id,
       description: body.description,
       item_type: body.item_type || 'Other',
+      deal_type: body.deal_type || 'Implementation',
       amount: body.amount,
       net_profit: body.net_profit || null,
       gross_margin_percent: body.gross_margin_percent || null,
-      invoice_date: body.invoice_date || null,
-      status: body.status || 'Pending',
       year_number: body.year_number || 1,
       is_upsell: body.is_upsell || false,
       commission_rate: rate,
@@ -52,10 +51,9 @@ export async function POST(request, { params }) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Update deal total_value
   await recalcDealTotal(id);
 
-  return NextResponse.json(data, { status: 201 });
+  return NextResponse.json({ ...data, line_item_invoices: [] }, { status: 201 });
 }
 
 async function recalcDealTotal(dealId) {
