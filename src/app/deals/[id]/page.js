@@ -6,20 +6,32 @@ import DealDetailClient from './DealDetailClient';
 async function getDeal(id) {
   const { data, error } = await supabase
     .from('deals')
-    .select('*, deal_line_items(*, line_item_invoices(*))')
+    .select('*, deal_line_items(*)')
     .eq('id', id)
     .single();
 
   if (error || !data) return null;
 
-  if (data.deal_line_items) {
-    data.deal_line_items.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-    data.deal_line_items.forEach((item) => {
-      if (item.line_item_invoices) {
-        item.line_item_invoices.sort((a, b) => new Date(a.invoice_date) - new Date(b.invoice_date));
-      }
+  // Fetch invoices separately to avoid PostgREST schema cache issues
+  const lineItemIds = (data.deal_line_items || []).map((i) => i.id);
+  let invoicesByItem = {};
+
+  if (lineItemIds.length > 0) {
+    const { data: invoices } = await supabase
+      .from('line_item_invoices')
+      .select('*')
+      .in('line_item_id', lineItemIds)
+      .order('invoice_date', { ascending: true });
+
+    (invoices || []).forEach((inv) => {
+      if (!invoicesByItem[inv.line_item_id]) invoicesByItem[inv.line_item_id] = [];
+      invoicesByItem[inv.line_item_id].push(inv);
     });
   }
+
+  data.deal_line_items = (data.deal_line_items || [])
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    .map((item) => ({ ...item, line_item_invoices: invoicesByItem[item.id] || [] }));
 
   return data;
 }
