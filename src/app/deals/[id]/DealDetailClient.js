@@ -146,6 +146,7 @@ export default function DealDetailClient({ deal: initialDeal }) {
   const [deletingId, setDeletingId] = useState(null);
   const [addingInvoiceTo, setAddingInvoiceTo] = useState(null);
   const [deletingInvoiceId, setDeletingInvoiceId] = useState(null);
+  const [togglingPaidId, setTogglingPaidId] = useState(null);
   const [collapsedItems, setCollapsedItems] = useState({});
 
   const lineItems = deal.deal_line_items || [];
@@ -220,6 +221,32 @@ export default function DealDetailClient({ deal: initialDeal }) {
       ),
     }));
     setAddingInvoiceTo(null);
+  };
+
+  const handleTogglePaid = async (invoice, lineItemId) => {
+    setTogglingPaidId(invoice.id);
+    const res = await fetch(`/api/invoices/${invoice.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paid: !invoice.paid }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setDeal((prev) => ({
+        ...prev,
+        deal_line_items: prev.deal_line_items.map((item) =>
+          item.id === lineItemId
+            ? {
+                ...item,
+                line_item_invoices: item.line_item_invoices.map((inv) =>
+                  inv.id === invoice.id ? updated : inv
+                ),
+              }
+            : item
+        ),
+      }));
+    }
+    setTogglingPaidId(null);
   };
 
   const handleDeleteInvoice = async (invoiceId, lineItemId) => {
@@ -454,15 +481,15 @@ export default function DealDetailClient({ deal: initialDeal }) {
                             {invoices.map((inv) => (
                               <div key={inv.id} className="flex items-center justify-between py-1.5 text-sm">
                                 <div className="flex items-center gap-3">
-                                  <Receipt className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                                  <span className="text-slate-600">
+                                  <Receipt className={`w-3.5 h-3.5 flex-shrink-0 ${inv.paid ? 'text-green-500' : 'text-slate-400'}`} />
+                                  <span className={inv.paid ? 'text-slate-400 line-through' : 'text-slate-600'}>
                                     {format(parseISO(inv.invoice_date), 'MMM d, yyyy')}
                                   </span>
-                                  <span className="font-medium text-slate-800">
+                                  <span className={`font-medium ${inv.paid ? 'text-slate-400' : 'text-slate-800'}`}>
                                     {formatCurrency(inv.amount)}
                                   </span>
                                   {!item.is_excluded && (
-                                    <span className="text-green-600 text-xs">
+                                    <span className={`text-xs ${inv.paid ? 'text-slate-400' : 'text-green-600'}`}>
                                       → {formatCurrency(inv.commission_amount)} commission
                                     </span>
                                   )}
@@ -470,14 +497,28 @@ export default function DealDetailClient({ deal: initialDeal }) {
                                     <span className="text-slate-400 text-xs">{inv.notes}</span>
                                   )}
                                 </div>
-                                <button
-                                  onClick={() => handleDeleteInvoice(inv.id, item.id)}
-                                  disabled={deletingInvoiceId === inv.id}
-                                  className="p-1 text-slate-300 hover:text-red-500 transition-colors"
-                                  title="Delete invoice"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
+                                <div className="flex items-center gap-2">
+                                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={inv.paid || false}
+                                      disabled={togglingPaidId === inv.id}
+                                      onChange={() => handleTogglePaid(inv, item.id)}
+                                      className="w-3.5 h-3.5 rounded border-slate-300 text-green-600 cursor-pointer"
+                                    />
+                                    <span className={`text-xs ${inv.paid ? 'text-green-600 font-medium' : 'text-slate-400'}`}>
+                                      Paid
+                                    </span>
+                                  </label>
+                                  <button
+                                    onClick={() => handleDeleteInvoice(inv.id, item.id)}
+                                    disabled={deletingInvoiceId === inv.id}
+                                    className="p-1 text-slate-300 hover:text-red-500 transition-colors"
+                                    title="Delete invoice"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
                               </div>
                             ))}
                           </div>
