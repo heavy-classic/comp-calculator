@@ -26,23 +26,23 @@ async function getDashboardData() {
   const allInvoices = invoicesRes.data || [];
   const recentPaychecks = paychecksRes.data || [];
 
-  // Total potential commission (based on line item amounts)
-  const totalCommissionDue = lineItems
-    .filter((i) => !i.is_excluded)
+  // Commission is earned when a line item is marked as Invoiced
+  const invoicedCommission = lineItems
+    .filter((i) => !i.is_excluded && i.invoiced)
     .reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
 
-  // Invoiced commission = sum of actual invoice commissions
-  const invoicedCommission = allInvoices
+  // Paid = invoice records marked as paid
+  const paidCommission = allInvoices
+    .filter((inv) => inv.paid)
     .reduce((s, inv) => s + parseFloat(inv.commission_amount || 0), 0);
 
-  const pendingCommission = totalCommissionDue - invoicedCommission;
+  const outstandingCommission = invoicedCommission - paidCommission;
 
   const totalPaid = recentPaychecks.reduce((s, p) => s + parseFloat(p.commission_amount || 0), 0);
 
   const dealsByStatus = {
     Pending: deals.filter((d) => d.status === 'Pending').length,
     Closed: deals.filter((d) => d.status === 'Closed').length,
-    Invoiced: deals.filter((d) => d.status === 'Invoiced').length,
   };
 
   // Upcoming invoices: future-dated invoices (next 90 days)
@@ -65,9 +65,9 @@ async function getDashboardData() {
     }));
 
   return {
-    totalCommissionDue,
     invoicedCommission,
-    pendingCommission,
+    paidCommission,
+    outstandingCommission,
     totalPaid,
     dealsByStatus,
     totalDeals: deals.length,
@@ -90,28 +90,28 @@ export default async function Dashboard() {
 
   const metrics = [
     {
-      label: 'Total Commission Due',
-      value: formatCurrency(data.totalCommissionDue),
+      label: 'Invoiced Commission',
+      value: formatCurrency(data.invoicedCommission),
       icon: TrendingUp,
       color: 'text-blue-600',
       bg: 'bg-blue-50',
-      sub: 'Across all deals & line items',
+      sub: 'Total commission from invoices',
     },
     {
-      label: 'Invoiced Commission',
-      value: formatCurrency(data.invoicedCommission),
+      label: 'Commission Paid',
+      value: formatCurrency(data.paidCommission),
       icon: CheckCircle,
       color: 'text-green-600',
       bg: 'bg-green-50',
-      sub: 'Ready to be paid',
+      sub: 'Marked as paid',
     },
     {
-      label: 'Pending Commission',
-      value: formatCurrency(data.pendingCommission),
+      label: 'Outstanding',
+      value: formatCurrency(data.outstandingCommission),
       icon: Clock,
       color: 'text-yellow-600',
       bg: 'bg-yellow-50',
-      sub: 'Not yet invoiced',
+      sub: 'Invoiced but not yet paid',
     },
     {
       label: 'Total Received',
@@ -150,14 +150,14 @@ export default async function Dashboard() {
       </div>
 
       {/* Commission Gap Alert */}
-      {data.invoicedCommission > data.totalPaid && (
+      {data.outstandingCommission > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
           <span className="text-amber-500 text-xl">⚠️</span>
           <div>
-            <p className="font-semibold text-amber-800">Commission Gap Detected</p>
+            <p className="font-semibold text-amber-800">Outstanding Commission</p>
             <p className="text-sm text-amber-700 mt-0.5">
-              You have {formatCurrency(data.invoicedCommission - data.totalPaid)} in invoiced commission
-              not yet matched to paycheck records. Check the{' '}
+              You have {formatCurrency(data.outstandingCommission)} in invoiced commission not yet marked as paid.
+              Check the{' '}
               <Link href="/comparison" className="underline font-medium">Comparison</Link> page for details.
             </p>
           </div>
@@ -260,7 +260,7 @@ export default async function Dashboard() {
               <tbody>
                 {data.recentDeals.map((deal) => {
                   const dealCommission = (deal.deal_line_items || [])
-                    .filter((i) => !i.is_excluded)
+                    .filter((i) => !i.is_excluded && i.invoiced)
                     .reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
                   return (
                     <tr key={deal.id} className="border-b border-slate-50 hover:bg-slate-50">

@@ -88,6 +88,24 @@ export async function PUT(request, { params }) {
   return NextResponse.json(data);
 }
 
+export async function PATCH(request, { params }) {
+  const { id } = await params;
+  const body = await request.json();
+
+  const { data, error } = await supabase
+    .from('deal_line_items')
+    .update({ invoiced: body.invoiced })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json(data);
+}
+
 export async function DELETE(request, { params }) {
   const { id } = await params;
   const { data: item } = await supabase

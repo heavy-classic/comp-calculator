@@ -161,16 +161,25 @@ export default function DealDetailClient({ deal: initialDeal }) {
   const [addingInvoiceTo, setAddingInvoiceTo] = useState(null);
   const [deletingInvoiceId, setDeletingInvoiceId] = useState(null);
   const [togglingPaidId, setTogglingPaidId] = useState(null);
+  const [togglingInvoicedId, setTogglingInvoicedId] = useState(null);
   const [collapsedItems, setCollapsedItems] = useState({});
 
   const lineItems = deal.deal_line_items || [];
-  const totalCommission = lineItems
+  // Commission is earned only when a line item is marked as Invoiced
+  const invoicedCommission = lineItems
+    .filter((i) => !i.is_excluded && i.invoiced)
+    .reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
+  // Paid = invoice records that have been marked paid
+  const paidCommission = lineItems
+    .filter((i) => !i.is_excluded)
+    .flatMap((i) => i.line_item_invoices || [])
+    .filter((inv) => inv.paid)
+    .reduce((s, inv) => s + parseFloat(inv.commission_amount || 0), 0);
+  const outstandingCommission = invoicedCommission - paidCommission;
+  // Potential = what commission will be when all line items are invoiced
+  const potentialCommission = lineItems
     .filter((i) => !i.is_excluded)
     .reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
-  const invoicedCommission = lineItems
-    .flatMap((i) => i.line_item_invoices || [])
-    .reduce((s, inv) => s + parseFloat(inv.commission_amount || 0), 0);
-  const pendingCommission = totalCommission - invoicedCommission;
 
   const toggleCollapse = (itemId) => {
     setCollapsedItems((prev) => ({ ...prev, [itemId]: !prev[itemId] }));
@@ -235,6 +244,27 @@ export default function DealDetailClient({ deal: initialDeal }) {
       ),
     }));
     setAddingInvoiceTo(null);
+  };
+
+  const handleToggleInvoiced = async (item) => {
+    setTogglingInvoicedId(item.id);
+    const res = await fetch(`/api/line-items/${item.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ invoiced: !item.invoiced }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setDeal((prev) => ({
+        ...prev,
+        deal_line_items: prev.deal_line_items.map((i) =>
+          i.id === item.id
+            ? { ...updated, line_item_invoices: i.line_item_invoices || [] }
+            : i
+        ),
+      }));
+    }
+    setTogglingInvoicedId(null);
   };
 
   const handleTogglePaid = async (invoice, lineItemId) => {
@@ -339,16 +369,16 @@ export default function DealDetailClient({ deal: initialDeal }) {
         {/* Commission Summary */}
         <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-slate-100">
           <div className="text-center">
-            <p className="text-xs text-slate-500 mb-1">Total Commission</p>
-            <p className="text-xl font-bold text-blue-600">{formatCurrency(totalCommission)}</p>
+            <p className="text-xs text-slate-500 mb-1">Invoiced Commission</p>
+            <p className="text-xl font-bold text-blue-600">{formatCurrency(invoicedCommission)}</p>
           </div>
           <div className="text-center border-x border-slate-100">
-            <p className="text-xs text-slate-500 mb-1">Invoiced Commission</p>
-            <p className="text-xl font-bold text-green-600">{formatCurrency(invoicedCommission)}</p>
+            <p className="text-xs text-slate-500 mb-1">Commission Paid</p>
+            <p className="text-xl font-bold text-green-600">{formatCurrency(paidCommission)}</p>
           </div>
           <div className="text-center">
-            <p className="text-xs text-slate-500 mb-1">Pending Commission</p>
-            <p className="text-xl font-bold text-yellow-600">{formatCurrency(pendingCommission)}</p>
+            <p className="text-xs text-slate-500 mb-1">Outstanding</p>
+            <p className="text-xl font-bold text-yellow-600">{formatCurrency(outstandingCommission)}</p>
           </div>
         </div>
       </div>
@@ -440,13 +470,30 @@ export default function DealDetailClient({ deal: initialDeal }) {
                           {!item.is_excluded && (
                             <span>
                               {(parseFloat(item.commission_rate || 0) * 100).toFixed(1)}% →{' '}
-                              <span className="font-medium text-slate-700">
-                                {formatCurrency(item.commission_amount)}
+                              <span className={`font-medium ${item.invoiced ? 'text-blue-700' : 'text-slate-400'}`}>
+                                {item.invoiced ? formatCurrency(item.commission_amount) : '$0'}
                               </span>{' '}
-                              potential commission
+                              commission
                             </span>
                           )}
                         </div>
+                        {/* Invoiced toggle */}
+                        {!item.is_excluded && (
+                          <div className="mt-2">
+                            <label className="inline-flex items-center gap-2 cursor-pointer select-none group">
+                              <input
+                                type="checkbox"
+                                checked={item.invoiced || false}
+                                disabled={togglingInvoicedId === item.id}
+                                onChange={() => handleToggleInvoiced(item)}
+                                className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer"
+                              />
+                              <span className={`text-xs font-medium ${item.invoiced ? 'text-blue-700' : 'text-slate-400'}`}>
+                                {item.invoiced ? 'Invoiced — commission counted' : 'Not invoiced — commission excluded'}
+                              </span>
+                            </label>
+                          </div>
+                        )}
                         {!item.is_excluded && invoices.length > 0 && (
                           <div className="mt-1.5 flex items-center gap-3 text-xs">
                             <span className="text-green-600 font-medium">
@@ -583,12 +630,12 @@ export default function DealDetailClient({ deal: initialDeal }) {
                 </span>
               </span>
               <span>
-                <span className="text-slate-500">Potential commission: </span>
-                <span className="font-bold text-blue-600">{formatCurrency(totalCommission)}</span>
+                <span className="text-slate-500">Potential: </span>
+                <span className="font-bold text-slate-400">{formatCurrency(potentialCommission)}</span>
               </span>
               <span>
                 <span className="text-slate-500">Invoiced: </span>
-                <span className="font-bold text-green-600">{formatCurrency(invoicedCommission)}</span>
+                <span className="font-bold text-blue-600">{formatCurrency(invoicedCommission)}</span>
               </span>
             </div>
           </div>

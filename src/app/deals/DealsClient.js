@@ -37,16 +37,18 @@ export default function DealsClient({ initialDeals }) {
     router.push(`/deals/${newDeal.id}`);
   };
 
-  const getDealCommission = (deal) => {
+  const getDealInvoicedCommission = (deal) => {
     return (deal.deal_line_items || [])
-      .filter((i) => !i.is_excluded)
+      .filter((i) => !i.is_excluded && i.invoiced)
       .reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
   };
 
-  const getDealInvoicedCommission = (deal) => {
+  const getDealPaidCommission = (deal) => {
     return (deal.deal_line_items || [])
-      .filter((i) => !i.is_excluded && i.status === 'Invoiced')
-      .reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
+      .filter((i) => !i.is_excluded)
+      .flatMap((i) => i.line_item_invoices || [])
+      .filter((inv) => inv.paid)
+      .reduce((s, inv) => s + parseFloat(inv.commission_amount || 0), 0);
   };
 
   return (
@@ -118,19 +120,19 @@ export default function DealsClient({ initialDeals }) {
         <div className="grid grid-cols-3 gap-4">
           {[
             {
-              label: 'Total Commission',
-              value: formatCurrency(filtered.reduce((s, d) => s + getDealCommission(d), 0)),
+              label: 'Invoiced Commission',
+              value: formatCurrency(filtered.reduce((s, d) => s + getDealInvoicedCommission(d), 0)),
               color: 'text-blue-600',
             },
             {
-              label: 'Invoiced Commission',
-              value: formatCurrency(filtered.reduce((s, d) => s + getDealInvoicedCommission(d), 0)),
+              label: 'Commission Paid',
+              value: formatCurrency(filtered.reduce((s, d) => s + getDealPaidCommission(d), 0)),
               color: 'text-green-600',
             },
             {
-              label: 'Pending Commission',
+              label: 'Outstanding',
               value: formatCurrency(
-                filtered.reduce((s, d) => s + getDealCommission(d) - getDealInvoicedCommission(d), 0)
+                filtered.reduce((s, d) => s + getDealInvoicedCommission(d) - getDealPaidCommission(d), 0)
               ),
               color: 'text-yellow-600',
             },
@@ -163,10 +165,10 @@ export default function DealsClient({ initialDeals }) {
       ) : (
         <div className="space-y-3">
           {filtered.map((deal) => {
-            const totalComm = getDealCommission(deal);
             const invoicedComm = getDealInvoicedCommission(deal);
+            const paidComm = getDealPaidCommission(deal);
             const lineItems = deal.deal_line_items || [];
-            const invoicedCount = lineItems.filter((i) => i.status === 'Invoiced').length;
+            const invoicedCount = lineItems.filter((i) => (i.line_item_invoices || []).length > 0).length;
 
             return (
               <Link
@@ -192,16 +194,16 @@ export default function DealsClient({ initialDeals }) {
                     {lineItems.length > 0 && (
                       <>
                         <span>·</span>
-                        <span className="text-green-600">{invoicedCount} invoiced</span>
+                        <span className="text-green-600">{invoicedCount} with invoices</span>
                       </>
                     )}
                   </div>
                 </div>
 
                 <div className="text-right flex-shrink-0">
-                  <p className="font-bold text-slate-900">{formatCurrency(totalComm)}</p>
+                  <p className="font-bold text-slate-900">{formatCurrency(invoicedComm)}</p>
                   <p className="text-xs text-slate-400">
-                    {formatCurrency(invoicedComm)} invoiced
+                    {formatCurrency(paidComm)} paid
                   </p>
                 </div>
 
