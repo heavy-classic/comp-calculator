@@ -97,7 +97,7 @@ export default function DealsClient({ initialDeals }) {
           />
         </div>
         <div className="flex gap-2">
-          {['All', 'Pending', 'Closed', 'Invoiced'].map((s) => (
+          {['All', 'Pending', 'Closed'].map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}

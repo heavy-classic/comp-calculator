@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 
 const SERVICE_TYPES = ['IdeaGen', 'Other'];
-const STATUSES = ['Pending', 'Closed', 'Invoiced'];
+const STATUSES = ['Pending', 'Closed'];
 
 export default function DealForm({ deal, onSuccess, onCancel }) {
   const isEdit = !!deal;
