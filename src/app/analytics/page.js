@@ -13,7 +13,7 @@ import { TrendingUp, DollarSign, Briefcase, Clock } from 'lucide-react';
 const DEAL_TYPE_COLORS = {
   Implementation: '#6366f1',
   Renewal: '#22c55e',
-  SoftwareResale: '#f97316',
+  'Software Resale': '#f97316',
 };
 
 const ITEM_TYPE_COLORS = {
@@ -85,7 +85,7 @@ function processData(deals, items, paychecks) {
   for (const deal of deals) {
     if (!deal.close_date) continue;
     const m = deal.close_date.substring(0, 7);
-    if (!dealsByMonth[m]) dealsByMonth[m] = { month: m, Implementation: 0, Renewal: 0, SoftwareResale: 0 };
+    if (!dealsByMonth[m]) dealsByMonth[m] = { month: m, Implementation: 0, Renewal: 0, 'Software Resale': 0 };
     dealsByMonth[m][deal.deal_type] = (dealsByMonth[m][deal.deal_type] || 0) + 1;
   }
   const dealsOverTime = Object.values(dealsByMonth)
@@ -335,7 +335,7 @@ export default function AnalyticsPage() {
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Bar dataKey="Implementation" stackId="a" fill={DEAL_TYPE_COLORS.Implementation} radius={[0, 0, 0, 0]} />
                 <Bar dataKey="Renewal" stackId="a" fill={DEAL_TYPE_COLORS.Renewal} radius={[0, 0, 0, 0]} />
-                <Bar dataKey="SoftwareResale" stackId="a" fill={DEAL_TYPE_COLORS.SoftwareResale} radius={[4, 4, 0, 0]} name="SW Resale" />
+                <Bar dataKey="Software Resale" stackId="a" fill={DEAL_TYPE_COLORS['Software Resale']} radius={[4, 4, 0, 0]} name="SW Resale" />
               </BarChart>
             </ResponsiveContainer>
           ) : (

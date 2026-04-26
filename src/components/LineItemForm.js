@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { calculateLineItemCommission, formatCurrency } from '@/lib/commission';
 
-const DEAL_TYPES = ['Implementation', 'Renewal', 'SoftwareResale'];
+const DEAL_TYPES = ['Implementation', 'Renewal', 'Software Resale'];
 const ITEM_TYPES = ['License', 'Support', 'Maintenance', 'Consulting', 'Other'];
 
 export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
@@ -100,13 +100,26 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
             <span>⚠️ <strong>Excluded:</strong> {preview.exclusionReason}</span>
           ) : (
             <span>
-              💰 Estimated commission: <strong>{formatCurrency(preview.commissionAmount)}</strong>
-              {' '}({(preview.rate * 100).toFixed(1)}% rate)
-              {form.billing_type === 'monthly' && form.amount && (
-                <span className="block mt-0.5 text-blue-600 text-xs">
-                  Monthly: {formatCurrency(parseFloat(form.amount) / 12)} invoice →{' '}
-                  {formatCurrency(preview.commissionAmount / 12)} commission per month
-                </span>
+              {form.deal_type === 'Software Resale' ? (
+                <>
+                  🏢 Invoke Public Sector: <strong>{formatCurrency(preview.invokePsAmount)}</strong>
+                  <span className="text-blue-600"> (35% of license)</span>
+                  <span className="block mt-0.5">
+                    💰 Your commission: <strong>{formatCurrency(preview.commissionAmount)}</strong>
+                    <span className="text-blue-600"> (35% of Invoke PS = 12.25% of license)</span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  💰 Estimated commission: <strong>{formatCurrency(preview.commissionAmount)}</strong>
+                  {' '}({(preview.rate * 100).toFixed(1)}% rate)
+                  {form.billing_type === 'monthly' && form.amount && (
+                    <span className="block mt-0.5 text-blue-600 text-xs">
+                      Monthly: {formatCurrency(parseFloat(form.amount) / 12)} invoice →{' '}
+                      {formatCurrency(preview.commissionAmount / 12)} commission per month
+                    </span>
+                  )}
+                </>
               )}
             </span>
           )}
@@ -194,21 +207,6 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
           />
         </div>
 
-        {form.deal_type === 'SoftwareResale' ? (
-          <div>
-            <label className="label">Net Profit ($)</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              className="input"
-              value={form.net_profit}
-              onChange={(e) => setForm({ ...form, net_profit: e.target.value })}
-              placeholder="Commission is based on net profit"
-            />
-            <p className="text-xs text-slate-400 mt-1">Used for commission calc (Yr1: 35%, Yr2+: 15%)</p>
-          </div>
-        ) : (
           <div>
             <label className="label">Gross Margin %</label>
             <input
@@ -223,37 +221,8 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
             />
             <p className="text-xs text-slate-400 mt-1">If ≤25%, commission is excluded</p>
           </div>
-        )}
       </div>
 
-      {form.deal_type === 'SoftwareResale' && (
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="label">Year Number</label>
-            <select
-              className="input"
-              value={form.year_number}
-              onChange={(e) => setForm({ ...form, year_number: parseInt(e.target.value) })}
-            >
-              <option value={1}>Year 1 (35% of Net Profit)</option>
-              <option value={2}>Year 2+ (15% of Net Profit)</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-3 pt-6">
-            <input
-              type="checkbox"
-              id="is_upsell"
-              checked={form.is_upsell}
-              onChange={(e) => setForm({ ...form, is_upsell: e.target.checked })}
-              className="w-4 h-4 rounded border-slate-300 text-blue-600"
-            />
-            <label htmlFor="is_upsell" className="text-sm text-slate-700">
-              Upsell / Incremental Revenue
-              <span className="block text-xs text-slate-400">(35% for Year 2+ upsell)</span>
-            </label>
-          </div>
-        </div>
-      )}
 
       <div className="flex gap-3 pt-2">
         <button type="submit" disabled={loading} className="btn-primary flex-1">

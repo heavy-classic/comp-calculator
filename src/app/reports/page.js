@@ -445,7 +445,7 @@ async function generateHRCommissionDetail(dateRange) {
     const rateLabel = getCommissionRateLabel(item.deal_type, deal.service_type, item.year_number, item.is_upsell);
     const billing = item.billing_type === 'monthly' ? 'Monthly billing (÷12)' : 'Upfront billing';
     const svc = `${deal.service_type || ''} ${item.deal_type || ''}`.trim();
-    if (item.deal_type === 'SoftwareResale') {
+    if (item.deal_type === 'Software Resale') {
       return `SW Resale · ${rateLabel} · ${billing}`;
     }
     return `${svc} · ${rateLabel} · ${billing}`;

@@ -33,7 +33,7 @@ function DealTypeBadge({ type }) {
   const colors = {
     Implementation: 'bg-blue-100 text-blue-700',
     Renewal: 'bg-green-100 text-green-700',
-    SoftwareResale: 'bg-purple-100 text-purple-700',
+    'Software Resale': 'bg-purple-100 text-purple-700',
   };
   return (
     <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${colors[type] || 'bg-slate-100 text-slate-600'}`}>
@@ -440,9 +440,9 @@ export default function DealDetailClient({ deal: initialDeal }) {
                               Upsell
                             </span>
                           )}
-                          {item.deal_type === 'SoftwareResale' && (
-                            <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
-                              Yr {item.year_number}
+                          {item.deal_type === 'Software Resale' && (
+                            <span className="text-xs bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">
+                              SW Resale
                             </span>
                           )}
                         </div>
@@ -467,7 +467,18 @@ export default function DealDetailClient({ deal: initialDeal }) {
                           {item.net_profit && (
                             <span>Net profit: {formatCurrency(item.net_profit)}</span>
                           )}
-                          {!item.is_excluded && (
+                          {!item.is_excluded && item.deal_type === 'Software Resale' && (
+                            <>
+                              <span className="text-purple-600 font-medium">
+                                Invoke PS: {formatCurrency(parseFloat(item.amount) * 0.35)}
+                              </span>
+                              <span className="text-slate-300">→</span>
+                              <span className={`font-medium ${item.invoiced ? 'text-blue-700' : 'text-slate-400'}`}>
+                                {item.invoiced ? formatCurrency(item.commission_amount) : '$0'} your commission
+                              </span>
+                            </>
+                          )}
+                          {!item.is_excluded && item.deal_type !== 'Software Resale' && (
                             <span>
                               {(parseFloat(item.commission_rate || 0) * 100).toFixed(1)}% →{' '}
                               <span className={`font-medium ${item.invoiced ? 'text-blue-700' : 'text-slate-400'}`}>
