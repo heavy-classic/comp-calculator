@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { formatCurrency } from '@/lib/commission';
+import { formatCurrency, getCommissionRateLabel } from '@/lib/commission';
 import { format, parseISO } from 'date-fns';
-import { FileText, Download, Mail, FileBarChart, FileSpreadsheet, FileClock, User } from 'lucide-react';
+import { FileText, Download, Mail, FileBarChart, FileSpreadsheet, FileClock, User, ClipboardList } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(date) {
@@ -399,6 +399,174 @@ async function generateHRSummary(dateRange) {
   return { totalGross, totalCommission };
 }
 
+async function generateHRCommissionDetail(dateRange) {
+  const jsPDF = (await import('jspdf')).default;
+  const autoTable = (await import('jspdf-autotable')).default;
+
+  const [deals, invoices] = await Promise.all([
+    fetch('/api/deals').then((r) => r.json()),
+    fetch('/api/invoices').then((r) => r.json()),
+  ]);
+
+  // Build lookup: lineItemId → { lineItem, deal }
+  const lineItemMap = {};
+  for (const deal of (Array.isArray(deals) ? deals : [])) {
+    for (const item of (deal.deal_line_items || [])) {
+      lineItemMap[item.id] = { item, deal };
+    }
+  }
+
+  // Join each invoice to its line item + deal, apply date filter
+  const rows = (Array.isArray(invoices) ? invoices : [])
+    .filter((inv) => {
+      if (dateRange.from && inv.invoice_date < dateRange.from) return false;
+      if (dateRange.to && inv.invoice_date > dateRange.to) return false;
+      return true;
+    })
+    .map((inv) => {
+      const { item = {}, deal = {} } = lineItemMap[inv.line_item_id] || {};
+      return { inv, item, deal };
+    })
+    .filter(({ item }) => item.id)
+    .sort((a, b) => (a.inv.invoice_date || '').localeCompare(b.inv.invoice_date || ''));
+
+  // Totals
+  const totalInvoiced = rows.reduce((s, { inv }) => s + parseFloat(inv.commission_amount || 0), 0);
+  const totalPaid = rows.filter(({ inv }) => inv.paid).reduce((s, { inv }) => s + parseFloat(inv.commission_amount || 0), 0);
+  const totalUnpaid = totalInvoiced - totalPaid;
+  const totalInvoiceValue = rows.reduce((s, { inv }) => s + parseFloat(inv.amount || 0), 0);
+
+  const periodLabel = dateRange.from && dateRange.to
+    ? `${fmt(dateRange.from)} – ${fmt(dateRange.to)}`
+    : 'All Time';
+
+  function rateExplanation(item, deal) {
+    if (item.is_excluded) return `Excluded — ${item.exclusion_reason || 'low margin'}`;
+    const rateLabel = getCommissionRateLabel(item.deal_type, deal.service_type, item.year_number, item.is_upsell);
+    const billing = item.billing_type === 'monthly' ? 'Monthly billing (÷12)' : 'Upfront billing';
+    const svc = `${deal.service_type || ''} ${item.deal_type || ''}`.trim();
+    if (item.deal_type === 'SoftwareResale') {
+      return `SW Resale · ${rateLabel} · ${billing}`;
+    }
+    return `${svc} · ${rateLabel} · ${billing}`;
+  }
+
+  const doc = new jsPDF({ orientation: 'landscape' });
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+
+  // ── Header
+  addPageHeader(doc, 'Commission Payment Detail Report', `Period: ${periodLabel}  ·  ${rows.length} invoice(s)`, pw);
+
+  // ── Summary boxes
+  const boxW = (pw - 28) / 4 - 3;
+  const summaryItems = [
+    { label: 'TOTAL INVOICE VALUE', value: formatCurrency(totalInvoiceValue), color: [30, 41, 59] },
+    { label: 'TOTAL COMMISSION EARNED', value: formatCurrency(totalInvoiced), color: [37, 99, 235] },
+    { label: 'COMMISSION PAID', value: formatCurrency(totalPaid), color: [22, 163, 74] },
+    { label: 'COMMISSION OUTSTANDING', value: formatCurrency(totalUnpaid), color: totalUnpaid > 0.01 ? [180, 83, 9] : [22, 163, 74] },
+  ];
+  summaryItems.forEach(({ label, value, color }, i) => {
+    const x = 14 + i * (boxW + 3);
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(x, 44, boxW, 22, 2, 2, 'FD');
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.setFont('helvetica', 'normal');
+    doc.text(label, x + 4, 52);
+    doc.setFontSize(12);
+    doc.setTextColor(...color);
+    doc.setFont('helvetica', 'bold');
+    doc.text(value, x + 4, 62);
+  });
+
+  // ── Commission rate reference
+  doc.setFillColor(239, 246, 255);
+  doc.setDrawColor(191, 219, 254);
+  doc.roundedRect(14, 72, pw - 28, 22, 2, 2, 'FD');
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 58, 138);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Commission Rate Schedule:', 18, 80);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  const rateText = [
+    'IdeaGen Implementation: 10%  |  IdeaGen Renewal: 5%  |  Other Implementation: 4%  |  Other Renewal: 2%',
+    'SW Resale Year 1: 35% of Net Profit  |  SW Resale Year 2+: 15% of Net Profit  |  SW Resale Year 2+ Upsell: 35% of Net Profit',
+    'Exclusion: Line items with gross margin ≤25% are excluded from commission.',
+  ];
+  rateText.forEach((line, i) => doc.text(line, 18, 86 + i * 4));
+
+  // ── Main invoice table
+  autoTable(doc, {
+    startY: 100,
+    head: [[
+      'Invoice Date', 'Customer', 'Deal Name', 'Line Item', 'Deal Type',
+      'Service', 'Billing', 'Invoice Amount', 'Comm. Rate', 'Commission', 'Paid', 'Rate Basis & Explanation',
+    ]],
+    body: rows.map(({ inv, item, deal }) => [
+      inv.invoice_date ? fmt(inv.invoice_date) : '—',
+      deal.customer_name || '—',
+      deal.deal_name || '—',
+      item.description || '—',
+      item.deal_type || '—',
+      deal.service_type || '—',
+      item.billing_type === 'monthly' ? 'Monthly' : 'Upfront',
+      formatCurrency(inv.amount),
+      item.is_excluded ? 'Excluded' : pct(item.commission_rate),
+      item.is_excluded ? '$0.00' : formatCurrency(inv.commission_amount),
+      inv.paid ? '✓ Paid' : 'Pending',
+      rateExplanation(item, deal),
+    ]),
+    foot: [['', '', '', '', '', '', '', formatCurrency(totalInvoiceValue), '', formatCurrency(totalInvoiced), `${rows.filter(r => r.inv.paid).length}/${rows.length} paid`, '']],
+    styles: { fontSize: 7, cellPadding: 2.5, overflow: 'linebreak' },
+    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', fontSize: 7 },
+    footStyles: { fontStyle: 'bold', fillColor: [241, 245, 249], textColor: [30, 41, 59] },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    columnStyles: {
+      0: { cellWidth: 20 },
+      1: { cellWidth: 24 },
+      2: { cellWidth: 28 },
+      3: { cellWidth: 28 },
+      4: { cellWidth: 22 },
+      5: { cellWidth: 16 },
+      6: { cellWidth: 16 },
+      7: { cellWidth: 22, halign: 'right' },
+      8: { cellWidth: 16, halign: 'center' },
+      9: { cellWidth: 20, halign: 'right', fontStyle: 'bold' },
+      10: { cellWidth: 16, halign: 'center' },
+      11: { cellWidth: 'auto' },
+    },
+    didParseCell: (data) => {
+      if (data.column.index === 10 && data.section === 'body') {
+        data.cell.styles.textColor = data.cell.raw === '✓ Paid' ? [22, 163, 74] : [180, 83, 9];
+        data.cell.styles.fontStyle = 'bold';
+      }
+      if (data.column.index === 8 && data.section === 'body' && data.cell.raw === 'Excluded') {
+        data.cell.styles.textColor = [200, 50, 50];
+      }
+    },
+  });
+
+  // ── Disclaimer
+  const finalY = Math.min(doc.lastAutoTable.finalY + 6, ph - 16);
+  doc.setFontSize(7.5);
+  doc.setTextColor(100, 116, 139);
+  doc.setFont('helvetica', 'italic');
+  doc.text(
+    'This report is generated from the Comp Calculator system and reflects commission earned on invoiced amounts. ' +
+    'Commission is recognized at the time of invoicing, not payment receipt. ' +
+    'All figures are subject to review and approval by HR and Finance.',
+    14, finalY,
+    { maxWidth: pw - 28 }
+  );
+
+  addPageNumbers(doc);
+  doc.save(`hr-commission-detail-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
+  return { totalInvoiced, totalPaid, totalUnpaid, count: rows.length, period: periodLabel };
+}
+
 // ─── Report config ────────────────────────────────────────────────────────────
 const REPORTS = [
   {
@@ -455,6 +623,22 @@ const REPORTS = [
       (r ? `Total gross compensation: ${formatCurrency(r.totalGross)}\nTotal commission: ${formatCurrency(r.totalCommission)}\n\n` : '') +
       `Please let me know if you need any additional information.\n\nThank you`,
   },
+  {
+    id: 'hr-commission-detail',
+    title: 'Commission Payment Detail',
+    description: 'Invoice-by-invoice commission breakdown with rate explanations, billing type, and paid status — designed for HR review and audit.',
+    icon: ClipboardList,
+    color: 'violet',
+    usesDates: true,
+    generate: generateHRCommissionDetail,
+    emailSubject: 'Commission Payment Detail — HR Review',
+    emailBody: (r) =>
+      `Hi,\n\nPlease find attached a detailed Commission Payment report for your review.\n\n` +
+      (r
+        ? `Period: ${r.period}\nInvoices: ${r.count}\nTotal commission earned: ${formatCurrency(r.totalInvoiced)}\nCommission paid: ${formatCurrency(r.totalPaid)}\nOutstanding: ${formatCurrency(r.totalUnpaid)}\n\n`
+        : '') +
+      `This report includes the commission rate basis and explanation for each invoice line, as well as payment status.\n\nPlease review and confirm at your earliest convenience.\n\nThank you`,
+  },
 ];
 
 // ─── Report card ──────────────────────────────────────────────────────────────
@@ -463,6 +647,7 @@ const COLOR_MAP = {
   indigo: { icon: 'bg-indigo-50 text-indigo-600', border: 'border-indigo-200', badge: 'bg-indigo-100 text-indigo-700' },
   amber: { icon: 'bg-amber-50 text-amber-600', border: 'border-amber-200', badge: 'bg-amber-100 text-amber-700' },
   green: { icon: 'bg-green-50 text-green-600', border: 'border-green-200', badge: 'bg-green-100 text-green-700' },
+  violet: { icon: 'bg-violet-50 text-violet-600', border: 'border-violet-200', badge: 'bg-violet-100 text-violet-700' },
 };
 
 function ReportCard({ report, dateRange, hrEmail }) {
