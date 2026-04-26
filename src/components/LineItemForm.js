@@ -15,6 +15,7 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
     description: lineItem?.description || '',
     item_type: lineItem?.item_type || 'Consulting',
     deal_type: lineItem?.deal_type || 'Implementation',
+    billing_type: lineItem?.billing_type || 'upfront',
     amount: lineItem?.amount || '',
     net_profit: lineItem?.net_profit || '',
     gross_margin_percent: lineItem?.gross_margin_percent || '',
@@ -101,6 +102,12 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
             <span>
               💰 Estimated commission: <strong>{formatCurrency(preview.commissionAmount)}</strong>
               {' '}({(preview.rate * 100).toFixed(1)}% rate)
+              {form.billing_type === 'monthly' && form.amount && (
+                <span className="block mt-0.5 text-blue-600 text-xs">
+                  Monthly: {formatCurrency(parseFloat(form.amount) / 12)} invoice →{' '}
+                  {formatCurrency(preview.commissionAmount / 12)} commission per month
+                </span>
+              )}
             </span>
           )}
         </div>
@@ -132,22 +139,49 @@ export default function LineItemForm({ deal, lineItem, onSuccess, onCancel }) {
         </div>
       </div>
 
-      <div>
-        <label className="label">Deal Type</label>
-        <select
-          className="input"
-          value={form.deal_type}
-          onChange={(e) => setForm({ ...form, deal_type: e.target.value })}
-        >
-          {DEAL_TYPES.map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="label">Deal Type</label>
+          <select
+            className="input"
+            value={form.deal_type}
+            onChange={(e) => setForm({ ...form, deal_type: e.target.value })}
+          >
+            {DEAL_TYPES.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="label">Billing Type</label>
+          <div className="flex gap-2 mt-1">
+            {[
+              { value: 'upfront', label: 'Upfront', hint: 'Full amount at once' },
+              { value: 'monthly', label: 'Monthly', hint: 'Amount ÷ 12 per month' },
+            ].map(({ value, label, hint }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setForm({ ...form, billing_type: value })}
+                className={`flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-colors ${
+                  form.billing_type === value
+                    ? 'bg-blue-600 border-blue-600 text-white'
+                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                }`}
+              >
+                {label}
+                <span className={`block text-xs font-normal mt-0.5 ${form.billing_type === value ? 'text-blue-100' : 'text-slate-400'}`}>
+                  {hint}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="label">Amount ($) *</label>
+          <label className="label">Amount ($) * {form.billing_type === 'monthly' && <span className="text-slate-400 font-normal text-xs ml-1">(total annual value)</span>}</label>
           <input
             type="number"
             step="0.01"

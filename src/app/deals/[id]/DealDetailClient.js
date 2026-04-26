@@ -43,7 +43,16 @@ function DealTypeBadge({ type }) {
 }
 
 function InvoiceForm({ lineItem, onAdd, onCancel }) {
-  const [form, setForm] = useState({ amount: '', invoice_date: '', notes: '' });
+  const isMonthly = lineItem.billing_type === 'monthly';
+  const monthlyAmount = isMonthly
+    ? +(parseFloat(lineItem.amount || 0) / 12).toFixed(2)
+    : 0;
+
+  const [form, setForm] = useState({
+    amount: isMonthly ? String(monthlyAmount) : '',
+    invoice_date: '',
+    notes: '',
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -87,7 +96,12 @@ function InvoiceForm({ lineItem, onAdd, onCancel }) {
         <div>
           <label className="text-xs font-medium text-slate-600 block mb-1">
             Amount ($) *
-            {remaining > 0 && (
+            {isMonthly && (
+              <span className="text-blue-500 font-normal ml-1">
+                Monthly: {formatCurrency(monthlyAmount)}/mo
+              </span>
+            )}
+            {!isMonthly && remaining > 0 && (
               <span className="text-slate-400 font-normal ml-1">
                 ({formatCurrency(remaining)} remaining)
               </span>
@@ -381,6 +395,11 @@ export default function DealDetailClient({ deal: initialDeal }) {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-slate-800">{item.description}</span>
                           <DealTypeBadge type={item.deal_type} />
+                          {item.billing_type === 'monthly' && (
+                            <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-medium">
+                              Monthly ÷12
+                            </span>
+                          )}
                           {item.item_type && (
                             <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
                               {item.item_type}
@@ -406,6 +425,11 @@ export default function DealDetailClient({ deal: initialDeal }) {
                         <div className="flex items-center gap-4 mt-2 text-sm text-slate-500">
                           <span>
                             <span className="font-medium text-slate-700">{formatCurrency(item.amount)}</span> total
+                            {item.billing_type === 'monthly' && (
+                              <span className="text-indigo-500 ml-1 text-xs">
+                                ({formatCurrency(parseFloat(item.amount) / 12)}/mo)
+                              </span>
+                            )}
                           </span>
                           {item.gross_margin_percent != null && item.gross_margin_percent !== '' && (
                             <span>GM: {item.gross_margin_percent}%</span>

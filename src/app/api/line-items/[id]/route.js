@@ -49,6 +49,7 @@ export async function PUT(request, { params }) {
       description: body.description,
       item_type: body.item_type || 'Other',
       deal_type: body.deal_type || 'Implementation',
+      billing_type: body.billing_type || 'upfront',
       amount: body.amount,
       net_profit: body.net_profit || null,
       gross_margin_percent: body.gross_margin_percent || null,
