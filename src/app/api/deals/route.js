@@ -26,7 +26,6 @@ export async function POST(request) {
       customer_name: body.customer_name,
       deal_name: body.deal_name,
       service_type: body.service_type,
-      deal_type: body.deal_type,
       status: body.status || 'Pending',
       total_value: body.total_value || 0,
       notes: body.notes || null,

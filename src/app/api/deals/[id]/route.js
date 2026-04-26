@@ -30,7 +30,6 @@ export async function PUT(request, { params }) {
       customer_name: body.customer_name,
       deal_name: body.deal_name,
       service_type: body.service_type,
-      deal_type: body.deal_type,
       status: body.status,
       total_value: body.total_value,
       notes: body.notes,
