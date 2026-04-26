@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { formatCurrency, getCommissionRateLabel, getMonthsInvoiced } from '@/lib/commission';
 import { format, parseISO } from 'date-fns';
-import { FileText, Download, Mail, FileBarChart, FileSpreadsheet, FileClock, User, ClipboardList } from 'lucide-react';
+import { FileText, Download, Mail, FileBarChart, FileSpreadsheet, FileClock, User, ClipboardList, BookOpen } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(date) {
@@ -586,6 +586,334 @@ async function generateHRCommissionDetail(dateRange) {
   return { totalInvoiced, totalPaid, totalUnpaid, count: rows.length, period: periodLabel };
 }
 
+async function generateExplanationOfBenefits(dateRange) {
+  const jsPDF = (await import('jspdf')).default;
+  const autoTable = (await import('jspdf-autotable')).default;
+
+  const deals = await fetch('/api/deals').then((r) => r.json());
+  const dealList = (Array.isArray(deals) ? deals : [])
+    .filter((d) => {
+      if (dateRange.from && d.close_date && d.close_date < dateRange.from) return false;
+      if (dateRange.to && d.close_date && d.close_date > dateRange.to) return false;
+      return true;
+    })
+    .sort((a, b) => (a.customer_name || '').localeCompare(b.customer_name || ''));
+
+  const doc = new jsPDF();
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+  const ML = 14;
+  const contentW = pw - ML * 2;
+
+  // ── Grand totals ─────────────────────────────────────────────────────────────
+  let grandContract = 0, grandPotential = 0, grandEarned = 0;
+  for (const deal of dealList) {
+    const months = getMonthsInvoiced(deal.close_date);
+    for (const item of (deal.deal_line_items || [])) {
+      if (item.is_excluded) continue;
+      grandContract  += parseFloat(item.amount || 0);
+      grandPotential += parseFloat(item.commission_amount || 0);
+      if (item.invoiced) {
+        grandEarned += item.billing_type === 'monthly'
+          ? (parseFloat(item.commission_amount || 0) / 12) * months
+          : parseFloat(item.commission_amount || 0);
+      }
+    }
+  }
+
+  // ── Plain-English commission explanation ──────────────────────────────────────
+  function getExplanationLines(item, deal, months) {
+    if (item.is_excluded) {
+      const reason = item.exclusion_reason
+        || (item.gross_margin_percent != null && item.gross_margin_percent !== ''
+            ? `Gross margin of ${item.gross_margin_percent}% is at or below the 25% minimum threshold`
+            : 'Gross margin is at or below the 25% minimum threshold');
+      return [
+        '⚠  EXCLUDED FROM COMMISSION',
+        `Reason: ${reason}`,
+        'Commission: $0.00 — this line item does not contribute to earned commission',
+      ];
+    }
+
+    const amt  = parseFloat(item.amount || 0);
+    const comm = parseFloat(item.commission_amount || 0);
+    const rate = parseFloat(item.commission_rate || 0);
+    const rateLabel = getCommissionRateLabel(item.deal_type, deal.service_type);
+
+    if (item.deal_type === 'Software Resale') {
+      const ips = amt * 0.35;
+      const rep = ips * 0.35;
+      return [
+        `License Amount: ${formatCurrency(amt)}`,
+        `Step 1 — Invoke Public Sector (employer) receives 35% of the license amount:  ${formatCurrency(amt)} × 35% = ${formatCurrency(ips)}`,
+        `Step 2 — Rep commission = 35% of the Invoke PS amount:  ${formatCurrency(ips)} × 35% = ${formatCurrency(rep)}  (equals 12.25% of the license total)`,
+        item.invoiced
+          ? `✓  Invoiced — ${formatCurrency(rep)} earned`
+          : 'Not yet invoiced — $0.00 counted toward earned commission',
+      ];
+    }
+
+    if (item.billing_type === 'monthly') {
+      const moAmt  = amt / 12;
+      const moComm = comm / 12;
+      const earned = moComm * months;
+      const startLabel = deal.close_date
+        ? (() => { try { return format(parseISO(String(deal.close_date).split('T')[0]), 'MMMM yyyy'); } catch { return '—'; } })()
+        : '—';
+      if (!item.invoiced) {
+        return [
+          `Annual Contract: ${formatCurrency(amt)}  →  Monthly invoice amount: ${formatCurrency(amt)} ÷ 12 = ${formatCurrency(moAmt)}/month`,
+          `Commission Rate: ${(rate * 100).toFixed(1)}%  (${rateLabel})  →  Monthly commission would be: ${formatCurrency(moAmt)} × ${(rate * 100).toFixed(1)}% = ${formatCurrency(moComm)}/month`,
+          'Not yet marked as invoiced — $0.00 counted toward earned commission',
+          `Full annual commission when invoiced and fully accrued over 12 months: ${formatCurrency(comm)}`,
+        ];
+      }
+      const remaining = 12 - months;
+      return [
+        `Annual Contract: ${formatCurrency(amt)}  →  Monthly invoice amount: ${formatCurrency(amt)} ÷ 12 = ${formatCurrency(moAmt)}/month`,
+        `Commission Rate: ${(rate * 100).toFixed(1)}%  (${rateLabel})  →  Monthly commission: ${formatCurrency(moAmt)} × ${(rate * 100).toFixed(1)}% = ${formatCurrency(moComm)}/month`,
+        `Billing started ${startLabel} — invoices are issued on the last day of each month`,
+        `Month ${months} of 12 invoiced to date:  ${formatCurrency(moComm)}/month × ${months} months = ${formatCurrency(earned)} earned so far`,
+        remaining > 0
+          ? `${remaining} month${remaining !== 1 ? 's' : ''} remaining:  ${formatCurrency(moComm)}/month × ${remaining} = ${formatCurrency(moComm * remaining)} still to accrue`
+          : `All 12 months invoiced — full annual commission of ${formatCurrency(comm)} fully earned`,
+        `Full 12-month commission total: ${formatCurrency(comm)}`,
+      ];
+    }
+
+    // Upfront / one-time
+    return [
+      `Contract Amount: ${formatCurrency(amt)}`,
+      `Commission Rate: ${(rate * 100).toFixed(1)}%  (${rateLabel} — ${deal.service_type || ''} ${item.deal_type || ''})`,
+      `Calculation: ${formatCurrency(amt)} × ${(rate * 100).toFixed(1)}% = ${formatCurrency(comm)}`,
+      item.invoiced
+        ? `✓  Invoiced — ${formatCurrency(comm)} earned`
+        : 'Not yet invoiced — $0.00 counted toward earned commission',
+    ];
+  }
+
+  // ── Y-tracking + page-break helper ───────────────────────────────────────────
+  let y = 0;
+  function ensure(needed) {
+    if (y + needed > ph - 18) { doc.addPage(); y = 14; }
+  }
+
+  // ── Cover header ──────────────────────────────────────────────────────────────
+  addPageHeader(doc, 'Commission Explanation of Benefits',
+    `${dealList.length} deal${dealList.length !== 1 ? 's' : ''}  ·  As of ${format(new Date(), 'MMMM d, yyyy')}`, pw);
+
+  // Grand-total summary boxes
+  const gb = (contentW / 3) - 2;
+  [
+    { lbl: 'TOTAL CONTRACT VALUE',       val: formatCurrency(grandContract),  clr: [30, 41, 59]   },
+    { lbl: 'TOTAL POTENTIAL COMMISSION', val: formatCurrency(grandPotential), clr: [37, 99, 235]  },
+    { lbl: 'TOTAL EARNED TO DATE',       val: formatCurrency(grandEarned),    clr: [22, 163, 74]  },
+  ].forEach(({ lbl, val, clr }, i) => {
+    const bx = ML + i * (gb + 3);
+    doc.setFillColor(248, 250, 252); doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(bx, 44, gb, 24, 2, 2, 'FD');
+    doc.setFontSize(6.5); doc.setTextColor(100, 116, 139); doc.setFont('helvetica', 'normal');
+    doc.text(lbl, bx + 4, 53);
+    doc.setFontSize(12); doc.setTextColor(...clr); doc.setFont('helvetica', 'bold');
+    doc.text(val, bx + 4, 63);
+  });
+  y = 76;
+
+  // ── Render each deal ──────────────────────────────────────────────────────────
+  for (let di = 0; di < dealList.length; di++) {
+    const deal = dealList[di];
+    const items = deal.deal_line_items || [];
+    const months = getMonthsInvoiced(deal.close_date);
+
+    const dContract  = items.filter(i => !i.is_excluded).reduce((s, i) => s + parseFloat(i.amount || 0), 0);
+    const dPotential = items.filter(i => !i.is_excluded).reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
+    const dEarned    = items.filter(i => !i.is_excluded && i.invoiced).reduce((s, i) =>
+      s + (i.billing_type === 'monthly'
+        ? (parseFloat(i.commission_amount || 0) / 12) * months
+        : parseFloat(i.commission_amount || 0)), 0);
+
+    ensure(58);
+
+    // ── Deal header bar ──────────────────────────────────────────────────────────
+    doc.setFillColor(37, 99, 235);
+    doc.roundedRect(ML, y, contentW, 24, 2, 2, 'F');
+
+    // Customer · Deal name
+    doc.setFontSize(11); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold');
+    doc.text(`${deal.customer_name || '—'}  ·  ${deal.deal_name || '—'}`, ML + 5, y + 9);
+
+    // Status pill
+    const sPill = deal.status || 'Pending';
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
+    const sPillW = doc.getTextWidth(sPill) + 10;
+    doc.setFillColor(sPill === 'Closed' ? 34 : 251, sPill === 'Closed' ? 197 : 191, sPill === 'Closed' ? 94 : 36);
+    doc.roundedRect(pw - ML - sPillW, y + 5, sPillW, 10, 2, 2, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.text(sPill, pw - ML - sPillW + 5, y + 11.5);
+
+    // Sub-line: all deal metadata
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(219, 234, 254);
+    const subParts = [
+      deal.service_type && `Service: ${deal.service_type}`,
+      deal.deal_type && `Type: ${deal.deal_type}`,
+      deal.close_date && `Close Date: ${fmt(deal.close_date)}`,
+      deal.total_value && `Deal Value: ${formatCurrency(deal.total_value)}`,
+      deal.created_at && `Added: ${fmt(deal.created_at)}`,
+    ].filter(Boolean);
+    doc.text(subParts.join('   ·   '), ML + 5, y + 19);
+    y += 28;
+
+    // ── Deal summary mini-boxes ──────────────────────────────────────────────────
+    const db = (contentW / 3) - 2;
+    [
+      { lbl: 'CONTRACT VALUE (ACTIVE ITEMS)',  val: formatCurrency(dContract),  clr: [30, 41, 59]  },
+      { lbl: 'POTENTIAL COMMISSION',           val: formatCurrency(dPotential), clr: [37, 99, 235] },
+      { lbl: 'EARNED TO DATE',                 val: formatCurrency(dEarned),    clr: [22, 163, 74] },
+    ].forEach(({ lbl, val, clr }, i) => {
+      const bx = ML + i * (db + 3);
+      doc.setFillColor(248, 250, 252); doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(bx, y, db, 16, 1, 1, 'FD');
+      doc.setFontSize(6); doc.setTextColor(100, 116, 139); doc.setFont('helvetica', 'normal');
+      doc.text(lbl, bx + 3, y + 5.5);
+      doc.setFontSize(10); doc.setTextColor(...clr); doc.setFont('helvetica', 'bold');
+      doc.text(val, bx + 3, y + 13);
+    });
+    y += 20;
+
+    // ── Line items ───────────────────────────────────────────────────────────────
+    for (let li = 0; li < items.length; li++) {
+      const item = items[li];
+      const comm  = parseFloat(item.commission_amount || 0);
+      const earned = (!item.is_excluded && item.invoiced)
+        ? (item.billing_type === 'monthly' ? (comm / 12) * months : comm) : 0;
+      const invoiceRecs = item.line_item_invoices || [];
+      const paidCount   = invoiceRecs.filter(inv => inv.paid).length;
+
+      ensure(95);
+
+      // Line item header strip
+      doc.setFillColor(item.is_excluded ? 254 : 241, item.is_excluded ? 242 : 245, item.is_excluded ? 242 : 249);
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(ML, y, contentW, 12, 1, 1, 'FD');
+
+      doc.setFontSize(8.5); doc.setTextColor(30, 41, 59); doc.setFont('helvetica', 'bold');
+      doc.text(`Line Item ${li + 1}:  ${item.description || '(no description)'}`, ML + 4, y + 8);
+
+      const badge = item.is_excluded ? 'EXCLUDED' : item.invoiced ? 'INVOICED ✓' : 'NOT YET INVOICED';
+      const badgeClr = item.is_excluded ? [220, 38, 38] : item.invoiced ? [22, 163, 74] : [180, 83, 9];
+      doc.setFontSize(7); doc.setTextColor(...badgeClr); doc.setFont('helvetica', 'bold');
+      doc.text(badge, pw - ML - doc.getTextWidth(badge) - 3, y + 8);
+      y += 14;
+
+      // All line-item fields in a 4-column key-value grid
+      const gmStr  = item.gross_margin_percent != null && item.gross_margin_percent !== ''
+        ? `${item.gross_margin_percent}%` : '—';
+      const npStr  = item.net_profit != null && item.net_profit !== ''
+        ? formatCurrency(item.net_profit) : '—';
+      const yrStr  = item.year_number ? `Year ${item.year_number}` : '—';
+      const invRecStr = invoiceRecs.length > 0
+        ? `${invoiceRecs.length} record${invoiceRecs.length !== 1 ? 's' : ''} (${paidCount} paid)`
+        : 'None';
+
+      const fieldRows = [
+        ['Amount',           formatCurrency(item.amount),
+         'Billing Type',    item.billing_type === 'monthly' ? 'Monthly  (annual ÷ 12)' : 'Upfront / One-time'],
+        ['Deal Type',        item.deal_type || '—',
+         'Service Type',    deal.service_type || '—'],
+        ['Gross Margin %',   gmStr,
+         'Net Profit',      npStr],
+        ['Year Number',      yrStr,
+         'Is Upsell',       item.is_upsell ? 'Yes' : 'No'],
+        ['Commission Rate',  item.is_excluded ? 'N/A — Excluded' : `${(parseFloat(item.commission_rate || 0) * 100).toFixed(2)}%`,
+         'Full Commission',  item.is_excluded ? '$0.00 — Excluded' : formatCurrency(comm)],
+        ['Earned to Date',   item.is_excluded ? '$0.00 — Excluded' : formatCurrency(earned),
+         'Invoiced',        item.invoiced ? 'Yes ✓' : 'No — pending'],
+        ['Invoice Records',  invRecStr,
+         'Excluded',        item.is_excluded ? `Yes — ${item.exclusion_reason || 'low margin'}` : 'No'],
+      ];
+
+      autoTable(doc, {
+        startY: y,
+        body: fieldRows,
+        styles: { fontSize: 7.5, cellPadding: 2.8 },
+        columnStyles: {
+          0: { fontStyle: 'bold', textColor: [100, 116, 139], cellWidth: 36 },
+          1: { textColor: [30, 41, 59], cellWidth: 46 },
+          2: { fontStyle: 'bold', textColor: [100, 116, 139], cellWidth: 36 },
+          3: { textColor: [30, 41, 59], cellWidth: 'auto' },
+        },
+        theme: 'plain',
+        tableLineColor: [226, 232, 240],
+        tableLineWidth: 0.2,
+      });
+      y = doc.lastAutoTable.finalY + 3;
+
+      // ── Commission explanation box ─────────────────────────────────────────────
+      // Measure wrapped lines first so the box height is accurate
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+      const expLines = getExplanationLines(item, deal, months);
+      const wrappedLines = expLines.flatMap(ln => doc.splitTextToSize(ln, contentW - 10));
+      const boxH = 9 + wrappedLines.length * 5;
+
+      ensure(boxH + 4);
+      doc.setFillColor(239, 246, 255); doc.setDrawColor(191, 219, 254);
+      doc.roundedRect(ML, y, contentW, boxH, 2, 2, 'FD');
+
+      doc.setFontSize(6.5); doc.setTextColor(30, 58, 138); doc.setFont('helvetica', 'bold');
+      doc.text('HOW THIS COMMISSION WAS CALCULATED', ML + 4, y + 6);
+
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 64, 175);
+      wrappedLines.forEach((ln, ei) => {
+        doc.text(ln, ML + 4, y + 12 + ei * 5);
+      });
+      y += boxH + 6;
+    }
+
+    // Divider between deals
+    if (di < dealList.length - 1) {
+      ensure(14);
+      doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.5);
+      doc.line(ML, y + 4, pw - ML, y + 4);
+      y += 12;
+    }
+  }
+
+  // ── Grand total footer bar ────────────────────────────────────────────────────
+  ensure(40);
+  y += 6;
+  doc.setFillColor(30, 41, 59);
+  doc.roundedRect(ML, y, contentW, 30, 2, 2, 'F');
+  doc.setFontSize(10); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold');
+  doc.text('GRAND TOTAL SUMMARY', ML + 5, y + 9);
+  doc.setFontSize(8.5); doc.setFont('helvetica', 'normal');
+  doc.text(
+    `Contract Value: ${formatCurrency(grandContract)}     Potential Commission: ${formatCurrency(grandPotential)}     Earned to Date: ${formatCurrency(grandEarned)}`,
+    ML + 5, y + 18
+  );
+  const earnedPct = grandPotential > 0 ? ((grandEarned / grandPotential) * 100).toFixed(1) : '0.0';
+  doc.setFontSize(7.5); doc.setTextColor(148, 163, 184);
+  doc.text(
+    `${earnedPct}% of potential commission earned to date  ·  ${dealList.length} deal${dealList.length !== 1 ? 's' : ''}  ·  ${format(new Date(), 'MMMM d, yyyy')}`,
+    ML + 5, y + 25
+  );
+  y += 36;
+
+  // Disclaimer
+  ensure(20);
+  doc.setFontSize(7); doc.setTextColor(148, 163, 184); doc.setFont('helvetica', 'italic');
+  doc.text(
+    'This Explanation of Benefits report includes all deal and line item fields and a plain-English explanation ' +
+    'of how each commission amount is calculated. Commission is earned when a line item is marked as Invoiced. ' +
+    'Monthly billing items accrue commission each month as invoices are issued on the last day of each month ' +
+    "from the deal's close date. All figures are subject to review and approval.",
+    ML, y + 6, { maxWidth: contentW }
+  );
+
+  addPageNumbers(doc);
+  doc.save(`explanation-of-benefits-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
+  return { dealCount: dealList.length, grandContract, grandPotential, grandEarned };
+}
+
 // ─── Report config ────────────────────────────────────────────────────────────
 const REPORTS = [
   {
@@ -658,6 +986,25 @@ const REPORTS = [
         : '') +
       `This report includes the commission rate basis and explanation for each invoice line, as well as payment status.\n\nPlease review and confirm at your earliest convenience.\n\nThank you`,
   },
+  {
+    id: 'eob',
+    title: 'Explanation of Benefits',
+    description: 'Every deal and line item — all fields, commission calculations explained in plain English, and earned-to-date breakdown. The clearest picture of how commissions are structured.',
+    icon: BookOpen,
+    color: 'teal',
+    usesDates: false,
+    generate: generateExplanationOfBenefits,
+    emailSubject: 'Commission Explanation of Benefits',
+    emailBody: (r) =>
+      `Hi,\n\nPlease find attached my Commission Explanation of Benefits report.\n\n` +
+      (r
+        ? `This report covers ${r.dealCount} deal${r.dealCount !== 1 ? 's' : ''}.\n` +
+          `Total contract value: ${formatCurrency(r.grandContract)}\n` +
+          `Total potential commission: ${formatCurrency(r.grandPotential)}\n` +
+          `Total earned to date: ${formatCurrency(r.grandEarned)}\n\n`
+        : '') +
+      `The report includes a plain-English explanation of how every commission amount is calculated, including monthly billing accrual and Software Resale structure.\n\nPlease let me know if you have any questions.\n\nThank you`,
+  },
 ];
 
 // ─── Report card ──────────────────────────────────────────────────────────────
@@ -667,6 +1014,7 @@ const COLOR_MAP = {
   amber: { icon: 'bg-amber-50 text-amber-600', border: 'border-amber-200', badge: 'bg-amber-100 text-amber-700' },
   green: { icon: 'bg-green-50 text-green-600', border: 'border-green-200', badge: 'bg-green-100 text-green-700' },
   violet: { icon: 'bg-violet-50 text-violet-600', border: 'border-violet-200', badge: 'bg-violet-100 text-violet-700' },
+  teal:   { icon: 'bg-teal-50 text-teal-600',     border: 'border-teal-200',   badge: 'bg-teal-100 text-teal-700'   },
 };
 
 function ReportCard({ report, dateRange, hrEmail }) {
