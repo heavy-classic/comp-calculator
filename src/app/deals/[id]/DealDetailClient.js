@@ -15,7 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import { formatCurrency } from '@/lib/commission';
+import { formatCurrency, getMonthsInvoiced } from '@/lib/commission';
 import DealForm from '@/components/DealForm';
 import LineItemForm from '@/components/LineItemForm';
 import { format, parseISO } from 'date-fns';
@@ -165,10 +165,19 @@ export default function DealDetailClient({ deal: initialDeal }) {
   const [collapsedItems, setCollapsedItems] = useState({});
 
   const lineItems = deal.deal_line_items || [];
-  // Commission is earned only when a line item is marked as Invoiced
-  const invoicedCommission = lineItems
-    .filter((i) => !i.is_excluded && i.invoiced)
-    .reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
+  // Months invoiced so far (for monthly billing items), based on deal close date
+  const monthsInvoiced = getMonthsInvoiced(deal.close_date);
+
+  // Helper: earned commission for a single line item
+  const getEarnedCommission = (item) => {
+    if (!item.invoiced || item.is_excluded) return 0;
+    if (item.billing_type === 'monthly') {
+      return (parseFloat(item.commission_amount || 0) / 12) * monthsInvoiced;
+    }
+    return parseFloat(item.commission_amount || 0);
+  };
+
+  const invoicedCommission = lineItems.reduce((s, i) => s + getEarnedCommission(i), 0);
   // Paid = invoice records that have been marked paid
   const paidCommission = lineItems
     .filter((i) => !i.is_excluded)
@@ -176,7 +185,7 @@ export default function DealDetailClient({ deal: initialDeal }) {
     .filter((inv) => inv.paid)
     .reduce((s, inv) => s + parseFloat(inv.commission_amount || 0), 0);
   const outstandingCommission = invoicedCommission - paidCommission;
-  // Potential = what commission will be when all line items are invoiced
+  // Potential = full annual commission when all line items are fully invoiced
   const potentialCommission = lineItems
     .filter((i) => !i.is_excluded)
     .reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
@@ -482,7 +491,9 @@ export default function DealDetailClient({ deal: initialDeal }) {
                             <span>
                               {(parseFloat(item.commission_rate || 0) * 100).toFixed(1)}% →{' '}
                               <span className={`font-medium ${item.invoiced ? 'text-blue-700' : 'text-slate-400'}`}>
-                                {item.invoiced ? formatCurrency(item.commission_amount) : '$0'}
+                                {item.billing_type === 'monthly'
+                                  ? `${formatCurrency(parseFloat(item.commission_amount || 0) / 12)}/mo`
+                                  : item.invoiced ? formatCurrency(item.commission_amount) : '$0'}
                               </span>{' '}
                               commission
                             </span>
@@ -491,7 +502,7 @@ export default function DealDetailClient({ deal: initialDeal }) {
                         {/* Invoiced toggle */}
                         {!item.is_excluded && (
                           <div className="mt-2">
-                            <label className="inline-flex items-center gap-2 cursor-pointer select-none group">
+                            <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                               <input
                                 type="checkbox"
                                 checked={item.invoiced || false}
@@ -500,9 +511,49 @@ export default function DealDetailClient({ deal: initialDeal }) {
                                 className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer"
                               />
                               <span className={`text-xs font-medium ${item.invoiced ? 'text-blue-700' : 'text-slate-400'}`}>
-                                {item.invoiced ? 'Invoiced — commission counted' : 'Not invoiced — commission excluded'}
+                                {item.billing_type === 'monthly'
+                                  ? item.invoiced
+                                    ? `Active — commission accruing by month`
+                                    : 'Not started — commission excluded'
+                                  : item.invoiced
+                                    ? 'Invoiced — commission counted'
+                                    : 'Not invoiced — commission excluded'}
                               </span>
                             </label>
+                          </div>
+                        )}
+                        {/* Month counter for monthly billing */}
+                        {!item.is_excluded && item.billing_type === 'monthly' && item.invoiced && (
+                          <div className="mt-2 p-2.5 bg-blue-50 border border-blue-100 rounded-lg">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-xs font-semibold text-blue-800">
+                                Month {monthsInvoiced} of 12 invoiced
+                              </span>
+                              <span className="text-xs text-blue-600 font-medium">
+                                {formatCurrency(getEarnedCommission(item))} earned
+                                {monthsInvoiced < 12 && (
+                                  <span className="text-blue-400 font-normal">
+                                    {' '}of {formatCurrency(item.commission_amount)} total
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            <div className="flex gap-0.5">
+                              {Array.from({ length: 12 }, (_, i) => (
+                                <div
+                                  key={i}
+                                  className={`h-2 flex-1 rounded-sm ${i < monthsInvoiced ? 'bg-blue-500' : 'bg-blue-100'}`}
+                                />
+                              ))}
+                            </div>
+                            <div className="flex justify-between mt-1">
+                              <span className="text-[10px] text-blue-400">
+                                {deal.close_date ? `Started ${format(parseISO(deal.close_date), 'MMM yyyy')}` : 'No close date set'}
+                              </span>
+                              <span className="text-[10px] text-blue-400">
+                                {formatCurrency(parseFloat(item.commission_amount || 0) / 12)}/mo · {12 - monthsInvoiced} months remaining
+                              </span>
+                            </div>
                           </div>
                         )}
                         {!item.is_excluded && invoices.length > 0 && (

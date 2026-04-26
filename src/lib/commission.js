@@ -134,6 +134,38 @@ export function calculateDealCommission(deal, lineItems) {
 }
 
 /**
+ * For monthly-billing line items: count how many months have been invoiced
+ * as of today, based on the deal close date.
+ *
+ * Rule: invoice goes out on the LAST DAY of each month, starting from
+ * the month the deal closed.
+ *
+ * Example — close date Feb 26 2026:
+ *   Feb 26 → 0 months (Feb 28 hasn't passed)
+ *   Feb 28 → 1 month  (end of Feb has passed)
+ *   Mar 31 → 2 months (end of Mar has passed)
+ */
+export function getMonthsInvoiced(closeDate, totalMonths = 12) {
+  if (!closeDate) return 0;
+  const datePart = String(closeDate).split('T')[0];
+  const [y, m] = datePart.split('-').map(Number);
+  const today = new Date();
+
+  let months = 0;
+  let year = y;
+  let month = m - 1; // convert to 0-indexed
+
+  while (months < totalMonths) {
+    const lastDayOfMonth = new Date(year, month + 1, 0); // day 0 of next month = last day of this month
+    if (lastDayOfMonth > today) break;
+    months++;
+    month++;
+    if (month > 11) { month = 0; year++; }
+  }
+  return months;
+}
+
+/**
  * Format currency
  */
 export function formatCurrency(value) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { formatCurrency, getCommissionRateLabel } from '@/lib/commission';
+import { formatCurrency, getCommissionRateLabel, getMonthsInvoiced } from '@/lib/commission';
 import { format, parseISO } from 'date-fns';
 import { FileText, Download, Mail, FileBarChart, FileSpreadsheet, FileClock, User, ClipboardList } from 'lucide-react';
 
@@ -441,14 +441,33 @@ async function generateHRCommissionDetail(dateRange) {
     : 'All Time';
 
   function rateExplanation(item, deal) {
-    if (item.is_excluded) return `Excluded — ${item.exclusion_reason || 'low margin'}`;
-    const rateLabel = getCommissionRateLabel(item.deal_type, deal.service_type, item.year_number, item.is_upsell);
-    const billing = item.billing_type === 'monthly' ? 'Monthly billing (÷12)' : 'Upfront billing';
+    if (item.is_excluded) return `Excluded — ${item.exclusion_reason || 'gross margin ≤25%'}`;
+
     const svc = `${deal.service_type || ''} ${item.deal_type || ''}`.trim();
+    const rateLabel = getCommissionRateLabel(item.deal_type, deal.service_type, item.year_number, item.is_upsell);
+
     if (item.deal_type === 'Software Resale') {
-      return `SW Resale · ${rateLabel} · ${billing}`;
+      const licenseAmt = parseFloat(item.amount || 0);
+      const invokePsAmt = (licenseAmt * 0.35).toFixed(2);
+      return `Software Resale: Invoke Public Sector (employer) receives 35% of license (${formatCurrency(invokePsAmt)}). Rep earns 35% of that = 12.25% of license total.`;
     }
-    return `${svc} · ${rateLabel} · ${billing}`;
+
+    if (item.billing_type === 'monthly') {
+      const annualCommission = parseFloat(item.commission_amount || 0);
+      const monthlyCommission = annualCommission / 12;
+      const monthsInvoiced = getMonthsInvoiced(deal.close_date);
+      const earnedToDate = monthlyCommission * monthsInvoiced;
+      const closeMonthLabel = deal.close_date
+        ? (() => { try { return format(parseISO(String(deal.close_date).split('T')[0]), 'MMM yyyy'); } catch { return 'N/A'; } })()
+        : 'N/A';
+      return (
+        `${svc} · ${rateLabel} · Monthly billing: invoice issued on last day of each month starting ${closeMonthLabel}. ` +
+        `${formatCurrency(monthlyCommission)}/mo commission. ` +
+        `Month ${monthsInvoiced} of 12 invoiced → ${formatCurrency(earnedToDate)} earned to date.`
+      );
+    }
+
+    return `${svc} · ${rateLabel} · Upfront (one-time) billing`;
   }
 
   const doc = new jsPDF({ orientation: 'landscape' });
@@ -492,9 +511,9 @@ async function generateHRCommissionDetail(dateRange) {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   const rateText = [
-    'IdeaGen Implementation: 10%  |  IdeaGen Renewal: 5%  |  Other Implementation: 4%  |  Other Renewal: 2%',
-    'SW Resale Year 1: 35% of Net Profit  |  SW Resale Year 2+: 15% of Net Profit  |  SW Resale Year 2+ Upsell: 35% of Net Profit',
-    'Exclusion: Line items with gross margin ≤25% are excluded from commission.',
+    'IdeaGen Implementation: 10%  |  IdeaGen Renewal: 5%  |  Other Implementation: 4%  |  Other Renewal: 2%  |  Exclusion: gross margin ≤25% = excluded',
+    'Software Resale: Invoke Public Sector (employer) receives 35% of license amount; rep earns 35% of that = 12.25% effective rate of license total',
+    'Monthly billing: invoice issued on last day of each month starting from the deal\'s close month; commission = (annual rate × contract ÷ 12) per month invoiced',
   ];
   rateText.forEach((line, i) => doc.text(line, 18, 86 + i * 4));
 

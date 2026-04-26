@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic';
 import { supabase } from '@/lib/supabase';
-import { formatCurrency } from '@/lib/commission';
+import { formatCurrency, getMonthsInvoiced } from '@/lib/commission';
 import Link from 'next/link';
 import {
   TrendingUp,
@@ -26,10 +26,17 @@ async function getDashboardData() {
   const allInvoices = invoicesRes.data || [];
   const recentPaychecks = paychecksRes.data || [];
 
-  // Commission is earned when a line item is marked as Invoiced
-  const invoicedCommission = lineItems
-    .filter((i) => !i.is_excluded && i.invoiced)
-    .reduce((s, i) => s + parseFloat(i.commission_amount || 0), 0);
+  // Commission is earned when a line item is marked as Invoiced.
+  // For monthly billing, only count commission for months that have been invoiced so far.
+  const invoicedCommission = deals.reduce((total, deal) => {
+    const months = getMonthsInvoiced(deal.close_date);
+    return total + (deal.deal_line_items || [])
+      .filter((i) => !i.is_excluded && i.invoiced)
+      .reduce((s, i) => {
+        if (i.billing_type === 'monthly') return s + (parseFloat(i.commission_amount || 0) / 12) * months;
+        return s + parseFloat(i.commission_amount || 0);
+      }, 0);
+  }, 0);
 
   // Paid = invoice records marked as paid
   const paidCommission = allInvoices
